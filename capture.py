@@ -37,6 +37,7 @@ import urllib3
 import gzip
 import shutil
 import pathlib
+import paramiko
 
 from datetime import datetime
 from getpass import getpass
@@ -316,8 +317,6 @@ def update_cpe_devices(logger, log_id, cpe_devices):
     config_file_contents = ''
     event = 'Reading contents of "config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
-    if config.app_log_level == 'DEBUG':
-        print('  - DEBUG: {}'.format(event))
     try:
         with open('./config.py', 'r') as fp:
             config_file_contents = fp.read()
@@ -329,8 +328,6 @@ def update_cpe_devices(logger, log_id, cpe_devices):
     else:
         event = 'Success'
         logger.debug('{} - {}'.format(log_id, event))
-        if config.app_log_level == 'DEBUG':
-            print('  - DEBUG: {}'.format(event))
 
         try:
             # -------------------------------------------------------------------- #
@@ -684,8 +681,6 @@ def update_listen_port(logger, log_id, listen_port):
     config_file_contents = ''
     event = 'Reading contents of "config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
-    if config.app_log_level == 'DEBUG':
-        print('  - DEBUG: {}'.format(event))
     try:
         with open('./config.py', 'r') as fp:
             config_file_contents = fp.read()
@@ -697,8 +692,6 @@ def update_listen_port(logger, log_id, listen_port):
     else:
         event = 'Successfully read in "config.py" file.'
         logger.debug('{} - {}'.format(log_id, event))
-        if config.app_log_level == 'DEBUG':
-            print('  - DEBUG: {}'.format(event))
 
         try:
             # ------------------------------- #
@@ -767,7 +760,7 @@ def update_listen_port(logger, log_id, listen_port):
 # Return:                                                                     #
 #    listen_port - Integer value in the range (1025 - 65535)                  #
 # --------------------------------------------------------------------------- #
-def get_report_level(logger, log_id):
+def get_listen_port(logger, log_id):
     """Get UPD port number to listen on for forwarded alarms from and OVOC server."""
 
     listen_port = 1025
@@ -826,247 +819,14 @@ def get_report_level(logger, log_id):
     return listen_port
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: get_file_id                                                       #
-#                                                                             #
-# Submit a REST API query to get the ID of a file stored on the OVOC server   #
-# acting as a file repository.                                                #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger   - File handler for storing logged actions                      #
-#     log_id   - Unique identifier for this devices log entries               #
-#     filename - Normalized configuration filename stored on OVOC server      #
-#     server   - Address of OVOC server used as file repository               #
-#     username - Username for REST API account on OVOC server                 #
-#     password - Password for REST API account on OVOC server                 #
-#                                                                             #
-# Return:                                                                     #
-#    task_info - Dictionary containing the following items:                   #
-#        status      - String: 'Success' or 'Fail'                            #
-#        statusCode  - Integer: REST response status code. (Ex: 200)          #
-#        fileId      - Integer: -1 for not found, >= 0 for ID of stored file  #
-#        description - String: Description of the task action                 #
-# --------------------------------------------------------------------------- #
-def get_file_id(logger, log_id, filename, server, username, password):
-    """Get file ID of file stored on OVOC file repository."""
-
-    # ------------------------------------------- #
-    # Create a dictionary to hold the relevant    #
-    # information to return for the current task. #
-    # ------------------------------------------- #
-    task_info = {}
-    task_info['task'] = 'Check for File'
-    task_info['status'] = 'Fail'
-    task_info['statusCode'] = -1
-    task_info['fileId'] = -1
-    task_info['description'] = ''
-
-    # ---------------- #
-    # Set REST API URL #
-    # ---------------- #
-    url = "https://" + server + "/ovoc/v1/swManager/files?detail=1&filter=(name='" + filename + "')"
-
-    event = 'Method [GET]" - Request URL: {}'.format(url)
-    logger.info('{} - {}'.format(log_id, event))
-
-    # -------------------------------- #
-    # Send REST request to OVOC server #
-    # -------------------------------- #
-    rest_response = send_rest('GET', url, username, password)
-    rest_response_data = ''
-    if type(rest_response) is str:
-        rest_response_data = rest_response
-        event = 'REST Request Error: {}'.format(rest_response_data)
-        logger.error('{} - {}'.format(log_id, event))
-
-        # ------------- #
-        # Set task info #
-        # ------------- #
-        task_info['description'] = event
-
-        event = 'REST request failed. Could not verify if configuration file is on OVOC server.'
-        logger.warning('{} - {}'.format(log_id, event))
-    else:
-        if 'Content-Type' in rest_response.headers:
-            if re.match('application/json', rest_response.headers['Content-Type']):
-                rest_response_data = {}
-                if len(rest_response.text) > 0:
-                    rest_response_data = json.loads(rest_response.text)
-                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
-                logger.debug('{} - {}'.format(log_id, event))
-            else:
-                rest_response_data = rest_response.text
-                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
-                logger.debug('{} - {}'.format(log_id, event))
-        else:
-            rest_response_data = rest_response.text
-            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
-            logger.debug('{} - {}'.format(log_id, event))
-
-        if rest_response.status_code == 200:
-            # ------------------------------------------------------------- #
-            # Status Code 200 - File already exists and needs to be removed #
-            # ------------------------------------------------------------- #
-            if 'files' in rest_response_data:
-
-                # ------------------------- #
-                # Get the file id from OVOC #
-                # ------------------------- #
-                event = 'Configuration file exists on this OVOC server'
-                logger.warning('{} - {}'.format(log_id, event))
-
-                # ------------- #
-                # Set task info #
-                # ------------- #
-                task_info['status'] = 'Success'
-                task_info['statusCode'] = rest_response.status_code
-                task_info['fileId'] = rest_response_data['files'][0]['id']
-                task_info['description'] = event
-
-            else:
-                event = 'Could not get file ID for configuration file from OVOC server'
-                logger.warning('{} - {}'.format(log_id, event))
-
-                # ------------- #
-                # Set task info #
-                # ------------- #
-                task_info['description'] = event
-        else:
-            # --------------------------------------------- #
-            # Get ID of file from server was not successful #
-            # --------------------------------------------- #
-            if 'description' in rest_response_data:
-                event = '{}'.format(rest_response_data['description'])
-                logger.warning('{} - {}'.format(log_id, event))
-            else:
-                event = 'Failed to get file ID from OVOC server'
-                logger.warning('{} - {}'.format(log_id, event))
-
-            # ------------- #
-            # Set task info #
-            # ------------- #
-            task_info['statusCode'] = rest_response.status_code
-            task_info['description'] = event
-
-    return task_info
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: delete_file                                                       #
-#                                                                             #
-# Submit a REST API query to delete a file that is stored on the OVOC server  #
-# acting as a file repository.                                                #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger   - File handler for storing logged actions                      #
-#     log_id   - Unique identifier for this devices log entries               #
-#     file_id  - Normalized configuration filename stored on OVOC server      #
-#     server   - Address of OVOC server used as file repository               #
-#     username - Username for REST API account on OVOC server                 #
-#     password - Password for REST API account on OVOC server                 #
-#                                                                             #
-# Return:                                                                     #
-#    task_info - Dictionary containing the following items:                   #
-#        status      - String: 'Success' or 'Fail'                            #
-#        statusCode  - Integer: REST response status code. (Ex: 200)          #
-#        description - String: Description of the task action                 #
-# --------------------------------------------------------------------------- #
-def delete_file(logger, log_id, file_id, server, username, password):
-    """Delete file stored on OVOC file repository."""
-
-    # ------------------------------------------- #
-    # Create a dictionary to hold the relevant    #
-    # information to return for the current task. #
-    # ------------------------------------------- #
-    task_info = {}
-    task_info['task'] = 'Delete File'
-    task_info['status'] = 'Fail'
-    task_info['statusCode'] = -1
-    task_info['description'] = ''
-
-    # ---------------- #
-    # Set REST API URL #
-    # ---------------- #
-    url = "https://" + server + "/ovoc/v1/swManager/files/" + str(file_id)
-
-    event = 'Method [DELETE] - Request URL: {}'.format(url)
-    logger.debug('{} - {}'.format(log_id, event))
-
-    # -------------------------------- #
-    # Send REST request to OVOC server #
-    # -------------------------------- #
-    rest_response = send_rest('DELETE', url, username, password)
-    rest_response_data = ''
-    if type(rest_response) is str:
-        rest_response_data = rest_response
-        event = 'REST Request Error: {}'.format(rest_response_data)
-        logger.debug('{} - {}'.format(log_id, event))
-
-        # ------------- #
-        # Set task info #
-        # ------------- #
-        task_info['description'] = event
-
-        event = 'REST request failed. Could not remove configuration file from OVOC server.'
-        logger.warning('{} - {}'.format(log_id, event))
-    else:
-        if 'Content-Type' in rest_response.headers:
-            if re.match('application/json', rest_response.headers['Content-Type']):
-                rest_response_data = {}
-                if len(rest_response.text) > 0:
-                    rest_response_data = json.loads(rest_response.text)
-                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
-                logger.debug('{} - {}'.format(log_id, event))
-            else:
-                rest_response_data = rest_response.text
-                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
-                logger.debug('{} - {}'.format(log_id, event))
-        else:
-            rest_response_data = rest_response.text
-            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
-            logger.debug('{} - {}'.format(log_id, event))
-
-        if rest_response.status_code == 200:
-            # ------------------------------------------- #
-            # Status Code 200 - Successfully removed file #
-            # ------------------------------------------- #
-            event = 'Successfully removed configuration file from OVOC server'
-            logger.info('{} - {}'.format(log_id, event))
-
-            # ------------- #
-            # Set task info #
-            # ------------- #
-            task_info['status'] = 'Success'
-            task_info['statusCode'] = rest_response.status_code
-            task_info['description'] = event
-
-        else:
-            # ------------------------------------------------ #
-            # File removal from this server was not successful #
-            # ------------------------------------------------ #
-            if 'description' in rest_response_data:
-                event = '{}'.format(rest_response_data['description'])
-                logger.warning('{} - {}'.format(log_id, event))
-            else:
-                event = 'Failed to remove configuration file from OVOC server'
-                logger.warning('{} - {}'.format(log_id, event))
-
-            # ------------- #
-            # Set task info #
-            # ------------- #
-            task_info['statusCode'] = rest_response.status_code
-            task_info['description'] = event
-
-    return task_info
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: put_cli_script                                                    #
+# FUNCTION: send_cli_script                                                   #
 #                                                                             #
 # Submit a REST API request to a device to execute the desired CLI script.    #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger   - File handler for storing logged actions                      #
 #     log_id   - Unique identifier for this devices log entries               #
-#     filename - Confiuration filename to create on OVOC server               #
-#     script   - Confiuration CLI script in TEXT format                       #
+#     script   - CLI script to execute on device in TEXT format               #
 #     device   - Address of CPE device to run script on                       #
 #     username - Username for account on CPE device                           #
 #     password - Password for account on CPE device                           #
@@ -1078,7 +838,7 @@ def delete_file(logger, log_id, file_id, server, username, password):
 #        output      - Detailed information of execution of CLI script        #
 #        description - String: Description of the task action                 #
 # --------------------------------------------------------------------------- #
-def put_cli_script(logger, log_id, filename, script, device, username, password):
+def send_cli_script(logger, log_id, script, device, username, password):
     """Submit REST API PUT request to execute CLI script on device."""
 
     # ------------------------------------------- #
@@ -1086,7 +846,7 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
     # information to return for the current task. #
     # ------------------------------------------- #
     task_info = {}
-    task_info['status'] = 'failure'
+    task_info['status'] = 'Failure'
     task_info['statusCode'] = -1
     task_info['output'] = ''
     task_info['description'] = ''
@@ -1103,7 +863,7 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
     url = "https://" + device + "/api/v1/files/cliScript/incremental"
 
     event = 'Method [PUT] - Request URL: {}'.format(url)
-    logger.debug('{} - {}'.format(log_id, event))
+    logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
     # Send REST request to OVOC server #
@@ -1113,7 +873,7 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
     if type(rest_response) is str:
         rest_response_data = rest_response
         event = 'REST Request Error: {}'.format(rest_response_data)
-        logger.debug('{} - {}'.format(log_id, event))
+        logger.error('{} - {}'.format(log_id, event))
 
         # ------------- #
         # Set task info #
@@ -1121,7 +881,7 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
         task_info['description'] = event
 
         event = 'REST request failed. Could not send CLI script to device.'
-        logger.warning('{} - {}'.format(log_id, event))
+        logger.error('{} - {}'.format(log_id, event))
     else:
         if 'Content-Type' in rest_response.headers:
             if re.match('application/json', rest_response.headers['Content-Type']):
@@ -1129,15 +889,15 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
                 if len(rest_response.text) > 0:
                     rest_response_data = json.loads(rest_response.text)
                 event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
-                logger.debug('{} - {}'.format(log_id, event))
+                logger.info('{} - {}'.format(log_id, event))
             else:
                 rest_response_data = rest_response.text
                 event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
-                logger.debug('{} - {}'.format(log_id, event))
+                logger.info('{} - {}'.format(log_id, event))
         else:
             rest_response_data = rest_response.text
             event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
-            logger.debug('{} - {}'.format(log_id, event))
+            logger.info('{} - {}'.format(log_id, event))
 
         if rest_response.status_code == 200:
             # --------------------------------------- #
@@ -1197,161 +957,6 @@ def put_cli_script(logger, log_id, filename, script, device, username, password)
     return task_info
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: store_config_file                                                 #
-#                                                                             #
-# Store the configuration file on the list of OVOC servers used as file       #
-# repositories using REST API.                                                #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger   - File handler for storing logged actions                      #
-#     log_id   - Unique identifier for this devices log entries               #
-#     filename - Normalized configuration filename to create on OVOC servers  #
-#     contents - Configuration file contents                                  #
-#     servers  - List of OVOC servers used as file repositories               #
-#                                                                             #
-# Return:                                                                     #
-#    task_info - Dictionary containing the following sub-dictionary items:    #
-#        'getFileId'  returned dictionary (See 'get_file_id' function call)   #
-#        'deleteFile' returned dictionary (See 'delete_file' function call)   #
-#        'putFile'    returned dictionary (See 'put_file' function call)      #
-# --------------------------------------------------------------------------- #
-def store_config_file(logger, log_id, filename, contents, servers):
-    """Store configuration file on list of OVOC servers used as file repositories."""
-
-    # --------------------------------------------- #
-    # Create a list that will contain  dictionaries #
-    # to hold the relevant information associated   #
-    # with the current task.                        #
-    # --------------------------------------------- #
-    task_info = []
-
-    index = 0
-    while index < len(servers):
-
-        this_ovoc_address = ''
-        this_ovoc_username = ''
-        this_ovoc_password = ''
-
-        for key in servers[index]:
-            if key == 'address':
-                this_ovoc_address = servers[index][key]
-            if key == 'username':
-                this_ovoc_username = servers[index][key]
-            if key == 'password':
-                this_ovoc_password = servers[index][key]
-
-        if this_ovoc_address != '' and this_ovoc_username != '' and this_ovoc_password != '':
-
-            # -------------------------------------------------------- #
-            # Track status of description of tasks to add to task info #
-            # -------------------------------------------------------- #
-            server_status = ''
-            server_severity = ''
-            last_description = ''
-
-            # ------------------------------------------ #
-            # Add task record for each server being used #
-            # ------------------------------------------ #
-            task_info.append({})
-            server_index = len(task_info) - 1
-            task_info[server_index]['server'] = this_ovoc_address
-            task_info[server_index]['tasks'] = []
-
-            do_file_upload = False
-
-            # --------------------------------------------------------------- #
-            # Check for preexisting configuration file on current OVOC server #
-            # --------------------------------------------------------------- #
-            event = 'Checking for preexisting configuration file [{}] on OVOC server [{}]'.format(filename, this_ovoc_address)
-            logger.info('{} - {}'.format(log_id, event))
-
-            # ----------------------------------------------------------------------- #
-            # Call to 'get_file_id' returns dictionary that includes:                 #
-            #    status      - String: 'Success' or 'Fail'                            #
-            #    statusCode  - Integer: REST response status code. (Ex: 200)          #
-            #    fileId      - Integer: -1 for not found, >= 0 for ID of stored file  #
-            #    description - String: Description of the task action                 #
-            # ----------------------------------------------------------------------- #
-            get_file_id_task = get_file_id(logger, log_id, filename, this_ovoc_address, this_ovoc_username, this_ovoc_password)
-
-            # ---------------------- #
-            # Store task information #
-            # ---------------------- #
-            server_status = get_file_id_task['status']
-            last_description = get_file_id_task['description']
-            preexisting_file_id = get_file_id_task['fileId']
-            task_info[server_index]['tasks'].append(get_file_id_task.copy())
-
-            # --------------------------------------------------------------- #
-            # Status Code: 204 - REST response received but no file was found #
-            # --------------------------------------------------------------- #
-            if get_file_id_task['statusCode'] == 204:
-                do_file_upload = True
-
-            if preexisting_file_id >= 0:
-                # ----------------------------------------------------------------- #
-                # Remove preexisting configuration file using 'preexisting_file_id' #
-                # ----------------------------------------------------------------- #
-                event = 'Removing preexisting file with same name from OVOC server'
-                logger.info('{} - {}'.format(log_id, event))
-
-                # ----------------------------------------------------------------------- #
-                # Call to 'get_file_id' returns dictionary that includes:                 #
-                #    status      - String: 'Success' or 'Fail'                            #
-                #    statusCode  - Integer: REST response status code. (Ex: 200)          #
-                #    description - String: Description of the task action                 #
-                # ----------------------------------------------------------------------- #
-                delete_file_task = delete_file(logger, log_id, preexisting_file_id, this_ovoc_address, this_ovoc_username, this_ovoc_password)
-
-                # ---------------------- #
-                # Store task information #
-                # ---------------------- #
-                server_status = delete_file_task['status']
-                last_description = delete_file_task['description']
-                task_info[server_index]['tasks'].append(delete_file_task.copy())
-
-                # -------------------------------------------------------------- #
-                # Status Code: 200 - REST response received and file was deleted #
-                # -------------------------------------------------------------- #
-                if delete_file_task['statusCode'] == 200:
-                    do_file_upload = True
-
-            else:
-                event = 'No preexisting file with same name on OVOC server'
-                logger.info('{} - {}'.format(log_id, event))
-
-            if do_file_upload:
-                # ---------------------------------------------------------- #
-                # Attempt to store configuration file on current OVOC server #
-                # ---------------------------------------------------------- #
-                event = 'Attempting to store configuration file [{}] on OVOC server [{}]'.format(filename, this_ovoc_address)
-                logger.info('{} - {}'.format(log_id, event))
-                put_file_task = put_file(logger, log_id, filename, contents, this_ovoc_address, this_ovoc_username, this_ovoc_password)
-
-                # ---------------------- #
-                # Store task information #
-                # ---------------------- #
-                #task_info[server_index]['putFile'] = put_file_task.copy()
-                server_status = put_file_task['status']
-                last_description = put_file_task['description']
-                task_info[server_index]['tasks'].append(put_file_task.copy())
-
-            # -------------------------------------- #
-            # Store task information at server level #
-            # -------------------------------------- #
-            task_info[server_index]['status'] = server_status
-            task_info[server_index]['description'] = last_description
-
-            if not do_file_upload:
-                task_info[server_index]['severity'] = 'CRITICAL'
-            else:
-                task_info[server_index]['severity'] = 'NORMAL'
-
-        index += 1
-
-    return task_info
-
-# --------------------------------------------------------------------------- #
 # FUNCTION: start_captures                                                    #
 #                                                                             #
 # Start network traffic captures on all CPE devices. The captures are started #
@@ -1364,7 +969,8 @@ def store_config_file(logger, log_id, filename, contents, servers):
 #     devices  - List of CPE devices to start network traffic captures on     #
 #                                                                             #
 # Return:                                                                     #
-#    job_info - Dictionary with list of CPE devices script status             #
+#    job_info - Dictionary containing the following sub-dictionary items:    #
+#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
 # --------------------------------------------------------------------------- #
 def start_captures(logger, log_id, devices):
     """Start network traffic captures on all devices in the 'devices' list."""
@@ -1372,371 +978,507 @@ def start_captures(logger, log_id, devices):
     print('')
     print('Starting network traffic captures on {} devices...'.format(len(devices)))
 
-    # ----------------------------------------- #
-    # Create dictionary to store records of     #
-    # each task taken on a device for this job. #
-    # ----------------------------------------- #
-    job_info = {}
-    job_info['devices'] = []
+    # --------------------------------------------- #
+    # Create a list that will contain  dictionaries #
+    # to hold the relevant information associated   #
+    # with each devices attempted tasks.            #
+    # --------------------------------------------- #
+    job_info = []
 
     index = 0
-    while index < len(cpe_devices):
-        for key in cpe_devices[index]:
+    while index < len(devices):
+
+        this_device_address = ''
+        this_device_username = ''
+        this_device_password = ''
+
+        for key in devices[index]:
             if key == 'address':
-                this_device_address = cpe_devices[index][key]
+                this_device_address = devices[index][key]
             if key == 'username':
-                this_device_address = cpe_devices[index][key]
+                this_device_username = devices[index][key]
             if key == 'password':
-                this_device_address = cpe_devices[index][key]
+                this_device_password = devices[index][key]
 
-        if this_device_address != '' and \
-           this_device_username != '' and \
-           this_device_password != '':
+        if this_device_address != '' and this_device_username != '' and this_device_password != '':
 
-            event = 'Sending debug capture command to CPE device #{}: [{}]'.format(index + 1, this_device_address)
-            logger.info('{} - {}'.format(log_id, event))
-            print('  + {}'.format(event))
+            # ------------------------------------------------ #
+            # Track task information to summarize for job info #
+            # ------------------------------------------------ #
+            device_status = ''
+            device_severity = ''
+            last_description = ''
 
-            cli_script = 
+            # --------------------------------------------- #
+            # Add job record for each device being targeted #
+            # --------------------------------------------- #
+            job_info.append({})
+            device_index = len(job_info) - 1
+            job_info[device_index]['device'] = this_device_address
+            job_info[device_index]['tasks'] = []
+
+            # ---------------------------------- #
+            # Start debug capture on this device #
+            # ---------------------------------- #
+            submitted = False
+            attempt = 1
+            while attempt <= config.max_retries and not submitted:
+
+                # ---------------------------------------- #
+                # Attempt to start debug capture on device #
+                # ---------------------------------------- #
+                event = 'Attempting to start debug capture on CPE device #{}: [{}]'.format(index + 1, this_device_address)
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + INFO: {}'.format(event))
+
+                cli_script = """
+debug capture data physical stop
+debug capture data physical eth-wan
+debug capture data physical start
+                """
+                start_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                # ---------------------- #
+                # Store task information #
+                # ---------------------- #
+                start_capture_task['task'] = 'Start capture'
+                job_info[device_index]['tasks'].append(start_capture_task.copy())
+
+                device_status = start_capture_task['status']
+                last_description = start_capture_task['description']
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = start_capture_task['description']
+                if device_status.lower() == 'success':
+                    submitted = True
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
+                else:
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+                attempt += 1
+
+            started = False
+            if submitted:
+                attempt = 1
+                while attempt <= config.max_retries and not started:
+                    # --------------------------------- #
+                    # Attempt to verify capture started #
+                    # --------------------------------- #
+                    event = 'Verifying debug capture started...'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + INFO: {}'.format(event))
+
+                    cli_script = """
+debug capture data physical show
+                    """
+                    verify_started_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    if re.match('Debug capture physical is active', verify_started_task['output']):
+                        started = True
+                        event = verify_started_task['description']
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        event = 'Debug capture is active.'
+                        verify_started_task['description'] = event
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+                    else:
+                        event = verify_started_task['description']
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+
+                    # ---------------------- #
+                    # Store task information #
+                    # ---------------------- #
+                    verify_started_task['task'] = 'Verify started'
+                    job_info[device_index]['tasks'].append(verify_started_task.copy())
+
+                    device_status = verify_started_task['status']
+                    last_description = verify_started_task['description']
+
+                    attempt += 1
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            job_info[device_index]['status'] = device_status
+            job_info[device_index]['description'] = last_description
+
+            if not started:
+                job_info[device_index]['severity'] = 'CRITICAL'
+            else:
+                job_info[device_index]['severity'] = 'NORMAL'
 
         index += 1
 
-            event = 'Processing zipped file: [{}]'.format(zip_filename)
-            logger.info('{} - {}'.format(log_id, event))
+    return job_info
 
-            # ------------------------------------- #
-            # Normalize base filename to lower case #
-            # ------------------------------------- #
-            base_filename = os.path.basename(zip_filename).lower()
+# --------------------------------------------------------------------------- #
+# FUNCTION: stop_capture                                                      #
+#                                                                             #
+# Stop network traffic captures on a specifc CPE device. The captures are     #
+# stopped by sending the appropriate CLI script command to the devices using  #
+# a REST API request.                                                         #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger   - File handler for storing logged actions                      #
+#     log_id   - Unique identifier for this devices log entries               #
+#     device   - CPE device to stop network traffic capture on                #
+#     devices  - List of target CPE devices                                   #
+#     job_info - Dictionary of tasks attempted by devices                     #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following sub-dictionary items:    #
+#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
+# --------------------------------------------------------------------------- #
+def stop_capture(logger, log_id, device, devices, job_info):
+    """Stop network traffic capture on specific device in the 'devices' list."""
 
-            # ------------------------------------------ #
-            # Remove any ':' or '-' separators if needed #
-            # ------------------------------------------ #
-            base_filename = re.sub('[:-]', '', base_filename)
+    device_found = False
+    index = 0
+    for this_device in devices:
+        if this_device['address'] == device:
 
-            event = 'Normalized base filename to lowercase and removed any ":" or "-" separators'
-            logger.info('{} - {}'.format(log_id, event))
-            event = 'Base filename: [{}]'.format(base_filename)
-            logger.info('{} - {}'.format(log_id, event))
+            device_found = True
+            this_device_address = this_device['address']
+            this_device_username = this_device['username']
+            this_device_password = this_device['password']
 
-            # ---------------------------------------------------------- #
-            # Create end of run report information record for this file. #
-            # The information in 'job_info' will be used to create the   #
-            # records of the CSV output file.                            #
-            # ---------------------------------------------------------- #
-            if base_filename != '':
-                job_info['files'].append({})
-                task_index = len(job_info['files']) - 1
-                job_info['files'][task_index]['baseFilename'] = base_filename
-                job_info['files'][task_index]['zipFilename'] = zip_filename
-                event = 'Created record in "job_info" dictionary for file'
-                logger.debug('{} - {}'.format(log_id, event))
+            print('Stopping network traffic capture on CPE device #{}: [{}]'.format(index + 1, this_device_address))
 
-            # ----------------------------------------------------- #
-            # Explanation of re.match REGEX to match MAC address:   #
-            #                                                       #
-            #   [0-9a-f] means an hexadecimal digit                 #
-            #   {2} means that we want two of them                  #
-            #   [-:]? means either a dash or a colon but optional.  #
-            #       Note that the dash as first char doesn't mean   #
-            #       a range but only means itself. This             #
-            #       subexpression is enclosed in parenthesis so it  #
-            #       can be reused later as a back reference.        #
-            #   [0-9a-f]{2} is another pair of hexadecimal digits   #
-            #   \\1 this means that we want to match the same       #
-            #       expression that we matched before as separator. #
-            #       This is what guarantees uniformity. Note that   #
-            #       the regexp syntax is \1 but I'm using a regular #
-            #       string so backslash must be escaped by doubling #
-            #       it.                                             #
-            #   [0-9a-f]{2} another pair of hex digits              #
-            #   {4} the previous parenthesized block must be        #
-            #       repeated exactly 4 times, giving a total of 6   #
-            #       pairs of digits:                                #
-            #       <pair> [<sep>] <pair> ( <same-sep> <pair> ) * 4 #
-            #   .cli$ The string must end right after this          #
-            #                                                       #
-            # REGEX accepts 12 hex digits with either : or - or     #
-            # nothing as separators between pairs (but the          #
-            # separator must be uniform... either all separators    #
-            # are : or are all - or there is no separator).         #
-            # ----------------------------------------------------- #
-            if re.match("[0-9a-f]{2}([-:]?)[0-9a-f]{2}(\\1[0-9a-f]{2}){4}.cli$", base_filename):
-                event = 'Base filename matches expected configuration file format'
+            # ------------------------------------------------ #
+            # Track task information to summarize for job info #
+            # ------------------------------------------------ #
+            device_status = ''
+            device_severity = ''
+            last_description = ''
+
+            # ------------------------------------------------------- #
+            # Get device index in 'job_info' of device being targeted #
+            # ------------------------------------------------------- #
+            got_device_index = False
+            device_index = 0
+            while device_index < len(job_info) and not got_device_index:
+                if job_info[device_index]['device'] == device:
+                    event = 'Found device in job_info dictionary at index: [{}]'.format(device_index)
+                    logger.debug('{} - {}'.format(log_id, event))
+                    got_device_index = True
+
+            # --------------------------------- #
+            # Stop debug capture on this device #
+            # --------------------------------- #
+            submitted = False
+            attempt = 1
+            while attempt <= config.max_retries and not submitted:
+
+                # --------------------------------------- #
+                # Attempt to stop debug capture on device #
+                # --------------------------------------- #
+                event = 'Attempting to stop debug capture on CPE device...'
                 logger.info('{} - {}'.format(log_id, event))
+                print('  + INFO: {}'.format(event))
 
-                files_to_store.append(zip_filename)
+                cli_script = """
+debug capture data physical stop
+                """
+                stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
-                # -------------------- #
-                # Add file to job info #
-                # -------------------- #
-                job_info['files'][task_index]['status'] = ''
-                job_info['files'][task_index]['severity'] = 'NORMAL'
-                job_info['files'][task_index]['description'] = ''
+                # ---------------------- #
+                # Store task information #
+                # ---------------------- #
+                stop_capture_task['task'] = 'Stop capture'
+                if got_device_index:
+                    job_info[device_index]['tasks'].append(stop_capture_task.copy())
 
+                    device_status = stop_capture_task['status']
+                    last_description = stop_capture_task['description']
+                else:
+                    event = 'Did not find device in previous job tasks!'
+                    logger.warning('{} - {}'.format(log_id, event))
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = stop_capture_task['description']
+                if device_status.lower() == 'success':
+                    submitted = True
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
+                else:
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+                attempt += 1
+
+            stopped = False
+            if submitted:
+                attempt = 1
+                while attempt <= config.max_retries and not stopped:
+                    # --------------------------------- #
+                    # Attempt to verify capture stopped #
+                    # --------------------------------- #
+                    event = 'Verifying debug capture stopped...'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + INFO: {}'.format(event))
+
+                    cli_script = """
+debug capture data physical show
+                    """
+                    verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    if re.match('Debug capture physical is not active', verify_stopped_task['output']):
+                        stopped = True
+                        event = verify_stopped_task['description']
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        event = 'Debug capture is not active.'
+                        verify_stopped_task['description'] = event
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+                    else:
+                        event = verify_stopped_task['description']
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+
+                    # ---------------------- #
+                    # Store task information #
+                    # ---------------------- #
+                    verify_stopped_task['task'] = 'Verify stopped'
+                    if got_device_index:
+                        job_info[device_index]['tasks'].append(verify_stopped_task.copy())
+
+                        device_status = verify_stopped_task['status']
+                        last_description = verify_stopped_task['description']
+                    else:
+                        event = 'Did not find device in previous job tasks!'
+                        logger.warning('{} - {}'.format(log_id, event))
+
+                    attempt += 1
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            if got_device_index:
+                job_info[device_index]['status'] = device_status
+                job_info[device_index]['description'] = last_description
+
+                if not stopped:
+                    job_info[device_index]['severity'] = 'MAJOR'
+                else:
+                    job_info[device_index]['severity'] = 'NORMAL'
             else:
-                event = 'Skipped unexpected file: [{}]'.format(base_filename)
+                event = 'Did not find device in previous job tasks!'
                 logger.warning('{} - {}'.format(log_id, event))
 
-                if base_filename != '':
-                    # -------------------- #
-                    # Add file to job info #
-                    # -------------------- #
-                    job_info['files'][task_index]['status'] = ''
-                    job_info['files'][task_index]['severity'] = 'MINOR'
-                    job_info['files'][task_index]['description'] = event
-                    print('    - {}: {}'.format(job_info['files'][task_index]['severity'], job_info['files'][task_index]['description']))
+        index += 1
 
-        # ---------------------------------------- #
-        # Add information to 'job_info' dictionary #
-        # ---------------------------------------- #
-        job_info['totalFiles'] = len(job_info['files'])
-        job_info['filesNoSuccess'] = 0
-        job_info['filesAllSuccess'] = 0
-        job_info['filesPartialSuccess'] = 0
-
-        files_to_store_cnt = len(files_to_store)
-        event = 'Files to store: [{}]'.format(files_to_store_cnt)
-        logger.info('{} - {}'.format(log_id, event))
-        job_info['filesToStore'] = files_to_store_cnt
-
-        total_servers = len(servers)
-        event = 'Total servers to use as file repositories: [{}]'.format(total_servers)
-        logger.info('{} - {}'.format(log_id, event))
-        job_info['totalServers'] = total_servers
-
-        total_cnt = files_to_store_cnt * total_servers
-        event = 'Total file storage actions to attempt: [{}]'.format(total_cnt)
-        logger.info('{} - {}'.format(log_id, event))
-        job_info['totalStorageAttempts'] = total_cnt
-
-        print('  + {} files match expected configuration file format'.format(files_to_store_cnt))
-        if total_servers == 1:
-            print('  + Storing configuration files on {} server'.format(total_servers))
-        else:
-            print('  + Storing configuration files on {} servers'.format(total_servers))
-
-        # ------------------------------------------------------------ #
-        # Start of progress indication bar.                            #
-        # The percentage of completion of a job is shown with '#' tick #
-        # marks. Total of 50 tick marks. Each tick mark represents 2%  #
-        # completion.                                                  #
-        #                                                              #
-        # Example:                                                     #
-        #  [##################################################] 100%   #
-        #                                                              #
-        # ------------------------------------------------------------ #
-        print('    0% [{}] 100%'.format('-' * 50))
-        #print('        ', end='', flush=True)
-
-        ticks = 0
-        files_cnt = 0
-        success_cnt = 0
-        critical_cnt = 0
-        major_cnt = 0
-        minor_cnt = 0
-        normal_cnt = 0
-
-        for zip_filename in files_to_store:
-
-            # ----------------------------------------------------------- #
-            # Get the index of file record in the 'job_index' dictionary. #
-            # This is referenced below as the 'task_index'. Any tasks     #
-            # associated with the file will be addded to the correct      #
-            # record.                                                     #
-            # ----------------------------------------------------------- #
-            task_index = -1
-            this_index = 0
-            event = 'Searching for file record in "job_info" dictionary...'
-            logger.debug('{} - {}'.format(log_id, event))
-
-            for this_file in job_info['files']:
-                if this_file['zipFilename'] == zip_filename:
-                    task_index = this_index
-                    event = 'Located record for file in "job_info" dictionary'
-                    logger.debug('{} - {}'.format(log_id, event))
-                    break
-                this_index += 1
-
-            if task_index >= 0:
-
-                # ---------------------------------------------------- #
-                # Increment the number of attempts to store each file. #
-                # Each file should be incremented by the total number  #
-                # of repositories it will try to be stored on.         #
-                # ---------------------------------------------------- #
-                files_cnt += total_servers
-
-                # ---------------------------------------------- #
-                # Read configuration file contents from ZIP file #
-                # ---------------------------------------------- #
-                try:
-                    fp = io.TextIOWrapper(zipObj.open(zip_filename, 'r'), encoding="utf-8")
-                    config_file_contents = fp.read()
-
-                except Exception as err:
-                    event = 'Unable to read zipped configuration file: [{}] - Error: {}'.format(zip_filename, err)
-                    logger.error('{} - {}'.format(log_id, event))
-
-                    # --------------------- #
-                    # Add event to job info #
-                    # --------------------- #
-                    job_info['files'][task_index]['status'] = 'Fail'
-                    job_info['files'][task_index]['severity'] = 'CRITICAL'
-                    job_info['files'][task_index]['description'] = event
-
-                else:
-                    event = 'Successfully extracted and read in zipped configuration file contents'
-                    logger.info('{} - {}'.format(log_id, event))
-
-                    # -------------------------------------------- #
-                    # Default the overall task of storing the file #
-                    # to the servers as 'failed'. This will be     #
-                    # updated below if the file was succesfully    #
-                    # stored on a server.                          #
-                    # -------------------------------------------- #
-                    job_info['files'][task_index]['status'] = 'Fail'
-
-                    # ---------------------------------------- #
-                    # Store configuration file on OVOC servers #
-                    # ---------------------------------------- #
-                    base_filename = job_info['files'][task_index]['baseFilename']
-                    task_info = store_config_file(logger, log_id, base_filename, config_file_contents, servers)
-
-                    # -------------------------------------------------------- #
-                    # Add event to job info. The 'task_info' variable returned #
-                    # above is a list of dictionaries for each server that the #
-                    # file was attempted to be stored on.                      #
-                    # -------------------------------------------------------- #
-                    job_info['files'][task_index]['servers'] = task_info.copy()
-
-                    # ------------------------------------------------- #
-                    # Set overall job status. If any one of the servers #
-                    # was successful in storing the configuration file, #
-                    # then the overall job status is set to 'Success'.  #
-                    # ------------------------------------------------- #
-                    task_success_cnt = 0
-                    for server in job_info['files'][task_index]['servers']:
-                        if server['status'] == 'Success':
-                            job_info['files'][task_index]['status'] = 'Success'
-                            task_success_cnt += 1
-                            # ---------------------------- #
-                            # Add to overall success count #
-                            # ---------------------------- #
-                            success_cnt += 1
-
-                    # -------------------------------------------------------- #
-                    # Set overall job severity. The serverity level is         #
-                    # calculated based on a percentage of successful uploads   #
-                    # of a file to a set of OVOC servers repositories.         #
-                    #                                                          #
-                    #   success_pct = 
-                    # The following levels can be set:                         #
-                    #     - CRITICAL: 0%   (file upload failed to all servers) #
-                    #     - MAJOR   : >0% - <50%                               #
-                    #     - MINOR   : 50% - <100%                              #
-                    #     - NORMAL  : 0% (file uploaded to all servers)        #
-                    # -------------------------------------------------------- #
-                    task_total_servers = len(job_info['files'][task_index]['servers'])
-                    task_success_pct = (task_success_cnt / task_total_servers) * 100
-                    event = 'Task success percentage: [{}]'.format(task_success_pct)
-                    logger.debug('{} - {}'.format(log_id, event))
-                    if task_success_pct == 0:
-                        job_info['files'][task_index]['severity'] = 'CRITICAL'
-                        job_info['files'][task_index]['description'] = 'File [{}] failed to be uploaded to any server!'.format(base_filename)
-                        critical_cnt += 1
-                        job_info['filesNoSuccess'] += 1
-                        event = 'File upload CRITICAL severity incremented to: [{}]'.format(critical_cnt)
-                        logger.debug('{} - {}'.format(log_id, event))
-                    elif task_success_pct > 0 and task_success_pct <= 50:
-                        job_info['files'][task_index]['severity'] = 'MAJOR'
-                        job_info['files'][task_index]['description'] = 'File [{}] only uploaded to {} of {} servers!'.format(base_filename, task_success_cnt, task_total_servers)
-                        major_cnt += 1
-                        job_info['filesPartialSuccess'] += 1
-                        event = 'File upload MAJOR severity incremented to: [{}]'.format(major_cnt)
-                        logger.debug('{} - {}'.format(log_id, event))
-                    elif task_success_pct > 50 and task_success_pct < 100:
-                        job_info['files'][task_index]['severity'] = 'MINOR'
-                        job_info['files'][task_index]['description'] = 'File [{}] uploaded to {} of {} servers.'.format(base_filename, task_success_cnt, task_total_servers)
-                        minor_cnt += 1
-                        job_info['filesPartialSuccess'] += 1
-                        event = 'File upload MINOR severity incremented to: [{}]'.format(minor_cnt)
-                        logger.debug('{} - {}'.format(log_id, event))
-                    else:
-                        job_info['files'][task_index]['severity'] = 'NORMAL'
-                        job_info['files'][task_index]['description'] = 'File [{}] uploaded successfully to all servers.'.format(base_filename)
-                        normal_cnt += 1
-                        job_info['filesAllSuccess'] += 1
-                        event = 'File upload NORMAL severity incremented to: [{}]'.format(normal_cnt)
-                        logger.debug('{} - {}'.format(log_id, event))
-
-                    event = 'Task Info:\n{}'.format(json.dumps(job_info['files'][task_index], indent=4))
-                    logger.debug('{} - {}'.format(log_id, event))
-
-                finally:
-                    # -------- #
-                    # Clean up #
-                    # -------- #
-                    fp.close()
-
-            else:
-                event = 'File record was not located in "job_info" dictionary!'
-                logger.error('{} - {}'.format(log_id, event))
-
-            # ----------------------- #
-            # Update the progress bar #
-            # ----------------------- #
-            if ticks < 50:
-                new_ticks = int((files_cnt / total_cnt) * 50)
-                i = 0
-                while i < new_ticks - ticks:
-                    if ticks < 50:
-                        #print('#', end='', flush=True)
-                        pass
-                    i += 1
-                ticks = new_ticks
-
-        # ------------------------- #
-        # Complete the progress bar #
-        # ------------------------- #
-        if ticks < 50:
-            #new_ticks = int((files_cnt / total_cnt) * 50)
-            new_ticks = 50
-            i = 0
-            while i < new_ticks - ticks:
-                if ticks < 50:
-                    #print('#', end='', flush=True)
-                    pass
-                i += 1
-            ticks = new_ticks
-        #print('\n', end='', flush=True)
-
-        # --------------- #
-        # Output job info #
-        # --------------- #
-        for job_item in job_info['files']:
-            if job_item['status'] != '':
-                if 'severity' in job_item:
-                    if job_item['severity'] == 'CRITICAL' or \
-                       job_item['severity'] == 'MAJOR' or \
-                       job_item['severity'] == 'MINOR':
-                        print('    - {}: {}'.format(job_item['severity'], job_item['description']))
-
-        # ------------------- #
-        # Print Success Ratio #
-        # ------------------- #
-        #print('  + Successful Upload Attempts: {0:5.1f}% '.format((success_cnt / total_cnt) * 100), flush=True)
-        print('  + Successful Upload Attempts: {0:5.1f}% '.format((success_cnt / total_cnt) * 100))
-
-    finally:
-        # -------- #
-        # Clean up #
-        # -------- #
-        zipObj.close()
-
-        print('  + Finished')
+    if not device_found:
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
 
     return job_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: retrieve_capture                                                  #
+#                                                                             #
+# Use the paramiko library to get the PCAP file stored locally on the device  #
+# using the SFTP protocol.                                                    #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger   - File handler for storing logged actions                      #
+#     log_id   - Unique identifier for this devices log entries               #
+#     device   - CPE device to stop network traffic capture on                #
+#     devices  - List of target CPE devices                                   #
+#     job_info - Dictionary of tasks attempted by devices                     #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following sub-dictionary items:    #
+#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
+# --------------------------------------------------------------------------- #
+def retrieve_capture(logger, log_id, device, devices, job_info):
+    """Retrieve the locally stored PCAP file on the device."""
+
+    device_found = False
+    index = 0
+    for this_device in devices:
+        if this_device['address'] == device:
+
+            device_found = True
+            this_device_address = this_device['address']
+            this_device_username = this_device['username']
+            this_device_password = this_device['password']
+
+            print('Retrieving network traffic capture from CPE device #{}: [{}]'.format(index + 1, this_device_address))
+
+            # ------------------------------------------------ #
+            # Track task information to summarize for job info #
+            # ------------------------------------------------ #
+            device_status = ''
+            device_severity = ''
+            last_description = ''
+
+            # ------------------------------------------------------- #
+            # Get device index in 'job_info' of device being targeted #
+            # ------------------------------------------------------- #
+            got_device_index = False
+            device_index = 0
+            while device_index < len(job_info) and not got_device_index:
+                if job_info[device_index]['device'] == device:
+                    event = 'Found device in job_info dictionary at index: [{}]'.format(device_index)
+                    logger.debug('{} - {}'.format(log_id, event))
+                    got_device_index = True
+
+            # ------------------------------------------------- #
+            # Retrieve debug capture file stored on this device #
+            # ------------------------------------------------- #
+            retrieved = False
+            attempt = 1
+            while attempt <= config.max_retries and not retrieved:
+
+                # -------------------------------------------------- #
+                # Attempt to retrieve debug capture file from device #
+                # -------------------------------------------------- #
+                event = 'Attempting to retrieve debug capture file from CPE device...'
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + INFO: {}'.format(event))
+
+                retrieve_capture_task = {}
+                retrieve_capture_task['task'] = 'Retrieve capture'
+
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                try:
+                    ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
+                    event = 'Connected to device'
+                    logger.info('{} - {}'.format(log_id, event))
+                    sftp = ssh.open_sftp()
+                    event = 'Successfully started SFTP session'
+                    logger.info('{} - {}'.format(log_id, event))
+                except Exception as err:
+                    event = '{}'.format(err)
+                    logger.error('{} - {}'.format(log_id, event))
+                    print("  - Error: {}".format(event))
+
+                else:
+                    # -------------------------------- #
+                    # Create filename to store pcap as #
+                    # -------------------------------- #
+                    file_timestamp = datetime.now()
+                    file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
+                    filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
+                    filename = re.sub(':', '.', filename)
+
+                    remote_file = '/debug-capture/debug-capture-data.pcap'
+                    local_file = './captures/' + filename
+
+                    try:
+                        sftp.get(remote_file, local_file, prefetch=False)
+                    except Exception as err:
+                        event = '{}'.format(err)
+                        logger.error('{} - {}'.format(log_id, event))
+                        retrieve_capture_task['status'] = 'Failure'
+                        #retrieve_capture_task['description'] = 'Failed to retrieve capture from device!'
+                        retrieve_capture_task['description'] = event
+                        print("  - Error: {}".format(event))
+                    else:
+                        retrieve_capture_task['status'] = 'Success'
+                        retrieve_capture_task['description'] = 'Stored capture from device as file: [{}]'.format(filename)
+                        retrieved = True
+
+                    # ---------------------- #
+                    # Store task information #
+                    # ---------------------- #
+                    job_info[device_index]['tasks'].append(retrieve_capture_task.copy())
+                    if got_device_index:
+                        device_status = retrieve_capture_task['status']
+                        last_description = retrieve_capture_task['description']
+                    else:
+                        event = 'Did not find device in previous job tasks!'
+                        logger.warning('{} - {}'.format(log_id, event))
+
+                attempt += 1
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = retrieve_capture_task['description']
+                if device_status.lower() == 'success':
+                    submitted = True
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
+                else:
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            if got_device_index:
+                job_info[device_index]['status'] = device_status
+                job_info[device_index]['description'] = last_description
+
+                if not retrieved:
+                    job_info[device_index]['severity'] = 'CRITICAL'
+                else:
+                    job_info[device_index]['severity'] = 'NORMAL'
+            else:
+                event = 'Did not find device in previous job tasks!'
+                logger.warning('{} - {}'.format(log_id, event))
+
+        index += 1
+
+    if not device_found:
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
+
+    return job_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: process_message                                                   #
+#                                                                             #
+# Parse the received message to determine the type (health check, OVOC alarm, #
+# status from other applications, etc.) Add the elements to a dictionary to   #
+# return.                                                                     #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger   - File handler for storing logged actions                      #
+#     log_id   - Unique identifier for this devices log entries               #
+#     message  - Received message from UDP socket                             #
+#                                                                             #
+# Return:                                                                     #
+#    msg_info - Dictionary containing the parsed items from the message.      #
+# --------------------------------------------------------------------------- #
+def process_message(logger, log_id, message):
+    """Parse the elements of a message and add to a dictionary."""
+
+    msg_info = {}
+
+    if re.match('New Alarm -', message):
+        msg_info['type'] = 'alarm'
+
+        msg_items = message.split(': ')
+        if len(msg_items) > 0:
+            msg_info['timestamp'] = msg_items[0]
+            msg_info['alarm'] = msg_items[1].split(' - ')[1]
+
+    event = 'Parsed message elements:\n{}'.format(json.dumps(msg_info, indent=4))
+    logger.debug('{} - {}'.format(log_id, event))
+
+    return msg_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: create_csv_file                                                   #
@@ -1949,6 +1691,11 @@ def main(argv):
     # ------------------ #
     version = '1.0'
 
+    # ----------------------------- #
+    # Prepare captures subdirectory #
+    # ----------------------------- #
+    pathlib.Path('./captures').mkdir(parents=True, exist_ok=True)
+
     # ------------------------------------- #
     # Initialize job information dictionary #
     # ------------------------------------- #
@@ -1967,6 +1714,8 @@ def main(argv):
     try:
         cpe_devices = get_cpe_devices(logger, log_id)
         listen_port = get_listen_port(logger, log_id)
+        max_retries = config.max_retries
+        max_events_per_device = config.max_events_per_device
 
     except KeyboardInterrupt:
         print('')
@@ -1975,40 +1724,19 @@ def main(argv):
         print('=================')
         exit(1)
 
-    exit(1)
-
     begin_time = time.time()
     begin_timestamp = datetime.now()
     print('')
     print('===============================================================================')
-    print('                        START NETWORK TRAFFIC CAPTURES')
+    print('                         CPE NETWORK TRAFFIC CAPTURES')
     print('===============================================================================')
     print('Start Time :', begin_timestamp)
-    print('')
-    index = 0
-    while index < len(cpe_devices):
-        for key in cpe_devices[index]:
-            if key == 'address':
-                this_device_address = cpe_devices[index][key]
-            if key == 'username':
-                this_device_address = cpe_devices[index][key]
-            if key == 'password':
-                this_device_address = cpe_devices[index][key]
-
-        if this_device_address != '' and \
-           this_device_username != '' and \
-           this_device_password != '':
-            print('Starting capture on CPE device #{}: {}'.format(index + 1, cpe_devices[index][key]))
-
-        index += 1
     print('-------------------------------------------------------------------------------')
 
-    # -------------------------------------------------------- #
-    # Process ZIP file containing ALU DMP configuration files. #
-    # Store each configuration file extracted on the list of   #
-    # defined OVOC servers.                                    # 
-    # -------------------------------------------------------- #
-    job_info = process_zip_file(logger, log_id, filename, ovoc_servers)
+    # ----------------------------------------- #
+    # Start captures on all defined CPE devices #
+    # ----------------------------------------- #
+    job_info = start_captures(logger, log_id, cpe_devices)
 
     # ------------------------------------------ #
     # For debugging - Output returned 'job_info' #
@@ -2017,10 +1745,71 @@ def main(argv):
     event = 'Job Info:\n{}'.format(json.dumps(job_info, indent=4))
     logger.debug('{} - {}'.format(log_id, event))
 
+    # ------------------------------------------ #
+    # Start UDP server to listen for OVOC alarms #
+    # and other inter-process messages. Messages #
+    # can be sent back and forth from other      #
+    # scripts to exchange status updates and     #
+    # health checks.                             #
+    # ------------------------------------------ #
+    buffer_size = 1024
+
+    # ------------------------------------ #
+    # Create a UDP datagram socket for any #
+    # IPv4 interface on this host.         #
+    # ------------------------------------ #
+    udp_server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+    try:
+        udp_server_socket.bind(('0.0.0.0', listen_port))
+    except Exception as err:
+        event = '{}'.format(err)
+        logger.error('{} - {}'.format(log_id, event))
+        print("  - Error: {}".format(event))
+
+    else:
+
+        event = 'Listening for OVOC alarms and other messages on UDP port: [{}]'.format(listen_port)
+        logger.info('{} - {}'.format(log_id, event))
+        print('{}'.format(event))
+
+        while(True):
+
+            bytes_address_pair = udp_server_socket.recvfrom(buffer_size)
+            message = bytes_address_pair[0]
+            address = bytes_address_pair[1]
+
+            # ------------------------ #
+            # Process received message #
+            # ------------------------ #
+            msg_info = process_message(logger, log_id, message.decode('utf-8'))
+
+            clientMsg = "Message from Client: {}".format(message)
+            clientIP  = "Client IP Address: {}".format(address[0])
+
+            print(clientMsg)
+            print(clientIP)
+
+            #device_with_alarm = '192.168.200.218'
+
+            # -------------------------- #
+            # Stop capture on CPE device #
+            # -------------------------- #
+            #job_info = stop_capture(logger, log_id, device_with_alarm, cpe_devices, job_info)
+
+            # ------------------------------------- #
+            # Retrieve capture file from CPE device #
+            # ------------------------------------- #
+            #job_info = retrieve_capture(logger, log_id, device_with_alarm, cpe_devices, job_info)
+
+    #else:
+    #    event = 'Failed to bind to UDP port: [{}]'.format(listen_port)
+    #    logger.error('{} - {}'.format(log_id, event))
+    #    print('ERROR: {}'.format(event))
+
     # ---------------------- #
     # Create CSV output file #
     # ---------------------- #
-    csv_records = create_csv_file(logger, log_id, output_csv, begin_timestamp, job_info)
+    #csv_records = create_csv_file(logger, log_id, output_csv, begin_timestamp, job_info)
 
     end_time = time.time()
     end_timestamp = datetime.now()
@@ -2030,56 +1819,6 @@ def main(argv):
     print('===============================================================================')
     print('Completed:', end_timestamp)
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
-    print('')
-    print('Total files processed in ZIP file: {}'.format(job_info['totalFiles']))
-    print('Total files matching expected configuration file format: {}'.format(job_info['filesToStore']))
-    print('')
-    print('Servers to use as file repositories: {}'.format(job_info['totalServers']))
-    print('         File upload attempts taken: {}'.format(job_info['totalStorageAttempts']))
-    print('')
-    print('Files that uploaded to ALL servers SUCCESSFULLY: {}'.format(job_info['filesAllSuccess']))
-    print('Files that FAILED to be uploaded to ALL servers: {}'.format(job_info['filesNoSuccess']))
-    print('Files with PARTIAL SUCCESS (Failed upload to at least 1 server): {}'.format(job_info['filesPartialSuccess']))
-    print('')
-    print('===============================================================================')
-
-    if report_level > 0:
-        print('                       ACTIONS DETAIL FOR FILES TO UPLOAD')
-        print('===============================================================================')
-        report_desc = ''
-        if report_level == 1:
-            report_desc = 'Only file upload action issues are reported.'
-        if report_level == 2:
-            report_desc = 'Both issues and successful file upload actions are reported.'
-        print('Report Level: \'{}\' - {}'.format(report_level, report_desc))
-        print('-------------------------------------------------------------------------------')
-
-        if report_level == 1 or report_level == 2:
-            if job_info['filesToStore'] == 0:
-                print('')
-                print('No file upload actions to report.')
-            else:
-                for csv_record in csv_records:
-
-                    # ------------------------------------ #
-                    # Report on any successful file upload #
-                    # ------------------------------------ #
-                    if report_level == 2:
-                        if csv_record['serverStatus'] == 'Success' and csv_record['task'] == 'Store File':
-                            print('\nCSV Row {}: ({}) - Severity: [{}] Server: [{}]'.format(csv_record['row'], csv_record['serverStatus'], csv_record['serverSeverity'], csv_record['server']))
-                            print('    [{}]: {}'.format(csv_record['filename'], csv_record['serverDescription']))
-
-                    # -------------------------------- #
-                    # Report on any failed file upload #
-                    # -------------------------------- #
-                    if report_level == 1 or report_level == 2:
-                        if csv_record['serverSeverity'].upper() != '' and csv_record['serverSeverity'].upper() != 'NORMAL':
-                            print('\nCSV Row {}: ({}) - Severity: [{}] Server: [{}]'.format(csv_record['row'], csv_record['serverStatus'], csv_record['serverSeverity'], csv_record['server']))
-                            print('   x[{}]: {}'.format(csv_record['filename'], csv_record['serverDescription']))
-
-            print('')
-            print('===============================================================================')
-
     print('')
 
 if __name__ == "__main__":

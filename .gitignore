@@ -9,6 +9,7 @@ __pycache__/
 # Local files to ignore
 tmp/
 logs/
+captures/
 
 # Distribution / packaging
 .Python

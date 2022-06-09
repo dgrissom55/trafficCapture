@@ -30,17 +30,24 @@ app_archived_files = 10
 # --------------------------------------------------------------- #
 listen_port = 20001
 
+# ---------------------------------------- #
+# Max retries for failed REST API requests #
+# ---------------------------------------- #
+max_retries = 5
+
+# --------------------------------------------------------------- #
+# Max events per device. After the max events have been triggered #
+# on all of the devices, the application will exit.               #
+# --------------------------------------------------------------- #
+max_events_per_device = 5
+
 # ---------------------------- #
 # List of targeted CPE devices #
 # ---------------------------- #
 cpe_devices = [
     {
-        "address": "192.168.200.253",
-        "username": "dgrissom"
-    },
-    {
-        "address": "192.168.200.252",
-        "username": "dgrissom"
+        "address": "192.168.200.218",
+        "username": "Admin"
     }
 ]
 
