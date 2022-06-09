@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Local files to ignore
+tmp/
+logs/
+
 # Distribution / packaging
 .Python
 build/
