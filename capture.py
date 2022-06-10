@@ -554,7 +554,9 @@ def get_cpe_devices(logger, log_id):
         # ------------------------------ #
         if len(cpe_devices) != 0:
             print('')
-            reply = str(input('Add another targeted CPE device: (y/n) ')).lower().strip()
+            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
+            if reply == '':
+                reply = 'n'
         else:
             reply = 'y'
 
@@ -633,7 +635,7 @@ def get_cpe_devices(logger, log_id):
             used_device_index += 1
 
             print('')
-            reply = str(input('Add another targeted CPE device: (y/n) ')).lower().strip()
+            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
 
         if len(cpe_devices) == 0:
             event = 'Must enter at least one CPE device to target for the network traffic capture.'
@@ -884,7 +886,7 @@ def send_cli_script(logger, log_id, script, device, username, password):
         logger.error('{} - {}'.format(log_id, event))
     else:
         if 'Content-Type' in rest_response.headers:
-            if re.match('application/json', rest_response.headers['Content-Type']):
+            if re.search('application/json', rest_response.headers['Content-Type']):
                 rest_response_data = {}
                 if len(rest_response.text) > 0:
                     rest_response_data = json.loads(rest_response.text)
@@ -966,11 +968,11 @@ def send_cli_script(logger, log_id, script, device, username, password):
 # Parameters:                                                                 #
 #     logger   - File handler for storing logged actions                      #
 #     log_id   - Unique identifier for this devices log entries               #
-#     devices  - List of CPE devices to start network traffic captures on     #
+#     devices  - List of entered CPE devices to start traffic captures on     #
 #                                                                             #
 # Return:                                                                     #
-#    job_info - Dictionary containing the following sub-dictionary items:    #
-#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
+#    devices_info - Dictionary containing a record for each device that       #
+#                   contains all the tasks executed against that device.      #
 # --------------------------------------------------------------------------- #
 def start_captures(logger, log_id, devices):
     """Start network traffic captures on all devices in the 'devices' list."""
@@ -978,12 +980,13 @@ def start_captures(logger, log_id, devices):
     print('')
     print('Starting network traffic captures on {} devices...'.format(len(devices)))
 
-    # --------------------------------------------- #
-    # Create a list that will contain  dictionaries #
-    # to hold the relevant information associated   #
-    # with each devices attempted tasks.            #
-    # --------------------------------------------- #
-    job_info = []
+    # -------------------------------------------- #
+    # Create a list that will contain dictionaries #
+    # to hold the relevant information associated  #
+    # with each devices attempted tasks.           #
+    # -------------------------------------------- #
+    devices_info = {}
+    devices_info['devices'] = []
 
     index = 0
     while index < len(devices):
@@ -1002,20 +1005,33 @@ def start_captures(logger, log_id, devices):
 
         if this_device_address != '' and this_device_username != '' and this_device_password != '':
 
-            # ------------------------------------------------ #
-            # Track task information to summarize for job info #
-            # ------------------------------------------------ #
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
             device_status = ''
             device_severity = ''
             last_description = ''
 
-            # --------------------------------------------- #
-            # Add job record for each device being targeted #
-            # --------------------------------------------- #
-            job_info.append({})
-            device_index = len(job_info) - 1
-            job_info[device_index]['device'] = this_device_address
-            job_info[device_index]['tasks'] = []
+            # ------------------------------------------------ #
+            # Add device record for each device being targeted #
+            # ------------------------------------------------ #
+            devices_info['devices'].append({})
+            device_index = len(devices_info['devices']) - 1
+            devices_info['devices'][device_index]['device'] = this_device_address
+            devices_info['devices'][device_index]['tasks'] = []
+
+            # ----------------------------------------------------- #
+            # Default the state to 'not active' to indicate the     #
+            # device is currently not performing a network capture. #
+            # ---------------------------------------------------- #
+            devices_info['devices'][device_index]['state'] = 'not active'
+
+            # ------------------------------------------------ #
+            # Default the number of alarm events seen for this #
+            # device to 0. Each device will restart the        #
+            # capture after receiving an alarm from OVOC.      #
+            # ------------------------------------------------ #
+            devices_info['devices'][device_index]['events'] = 0
 
             # ---------------------------------- #
             # Start debug capture on this device #
@@ -1042,7 +1058,9 @@ debug capture data physical start
                 # Store task information #
                 # ---------------------- #
                 start_capture_task['task'] = 'Start capture'
-                job_info[device_index]['tasks'].append(start_capture_task.copy())
+                task_timestamp = datetime.now()
+                start_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                devices_info['devices'][device_index]['tasks'].append(start_capture_task.copy())
 
                 device_status = start_capture_task['status']
                 last_description = start_capture_task['description']
@@ -1080,7 +1098,7 @@ debug capture data physical show
                     # --------------- #
                     # Display results #
                     # --------------- #
-                    if re.match('Debug capture physical is active', verify_started_task['output']):
+                    if re.search('Debug capture physical is active', verify_started_task['output']):
                         started = True
                         event = verify_started_task['description']
                         logger.error('{} - {}'.format(log_id, event))
@@ -1099,7 +1117,9 @@ debug capture data physical show
                     # Store task information #
                     # ---------------------- #
                     verify_started_task['task'] = 'Verify started'
-                    job_info[device_index]['tasks'].append(verify_started_task.copy())
+                    task_timestamp = datetime.now()
+                    verify_started_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    devices_info['devices'][device_index]['tasks'].append(verify_started_task.copy())
 
                     device_status = verify_started_task['status']
                     last_description = verify_started_task['description']
@@ -1109,17 +1129,18 @@ debug capture data physical show
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            job_info[device_index]['status'] = device_status
-            job_info[device_index]['description'] = last_description
+            devices_info['devices'][device_index]['status'] = device_status
+            devices_info['devices'][device_index]['description'] = last_description
 
             if not started:
-                job_info[device_index]['severity'] = 'CRITICAL'
+                devices_info['devices'][device_index]['severity'] = 'CRITICAL'
             else:
-                job_info[device_index]['severity'] = 'NORMAL'
+                devices_info['devices'][device_index]['state'] = 'active'
+                devices_info['devices'][device_index]['severity'] = 'NORMAL'
 
         index += 1
 
-    return job_info
+    return devices_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: stop_capture                                                      #
@@ -1133,13 +1154,13 @@ debug capture data physical show
 #     log_id   - Unique identifier for this devices log entries               #
 #     device   - CPE device to stop network traffic capture on                #
 #     devices  - List of target CPE devices                                   #
-#     job_info - Dictionary of tasks attempted by devices                     #
+#     devices_info - Dictionary of tasks attempted by devices                 #
 #                                                                             #
 # Return:                                                                     #
-#    task_info - Dictionary containing the following sub-dictionary items:    #
-#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def stop_capture(logger, log_id, device, devices, job_info):
+def stop_capture(logger, log_id, device, devices, devices_info):
     """Stop network traffic capture on specific device in the 'devices' list."""
 
     device_found = False
@@ -1154,21 +1175,21 @@ def stop_capture(logger, log_id, device, devices, job_info):
 
             print('Stopping network traffic capture on CPE device #{}: [{}]'.format(index + 1, this_device_address))
 
-            # ------------------------------------------------ #
-            # Track task information to summarize for job info #
-            # ------------------------------------------------ #
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
             device_status = ''
             device_severity = ''
             last_description = ''
 
-            # ------------------------------------------------------- #
-            # Get device index in 'job_info' of device being targeted #
-            # ------------------------------------------------------- #
+            # ---------------------------------------------------- #
+            # Get index in 'devices_info' of device being targeted #
+            # ---------------------------------------------------- #
             got_device_index = False
             device_index = 0
-            while device_index < len(job_info) and not got_device_index:
-                if job_info[device_index]['device'] == device:
-                    event = 'Found device in job_info dictionary at index: [{}]'.format(device_index)
+            while device_index < len(devices_info['devices']) and not got_device_index:
+                if devices_info['devices'][device_index]['device'] == device:
+                    event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
                     logger.debug('{} - {}'.format(log_id, event))
                     got_device_index = True
 
@@ -1195,13 +1216,15 @@ debug capture data physical stop
                 # Store task information #
                 # ---------------------- #
                 stop_capture_task['task'] = 'Stop capture'
+                task_timestamp = datetime.now()
+                stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                 if got_device_index:
-                    job_info[device_index]['tasks'].append(stop_capture_task.copy())
+                    devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
 
                     device_status = stop_capture_task['status']
                     last_description = stop_capture_task['description']
                 else:
-                    event = 'Did not find device in previous job tasks!'
+                    event = 'Did not find device in previously tracked devices!'
                     logger.warning('{} - {}'.format(log_id, event))
 
                 # --------------- #
@@ -1237,7 +1260,7 @@ debug capture data physical show
                     # --------------- #
                     # Display results #
                     # --------------- #
-                    if re.match('Debug capture physical is not active', verify_stopped_task['output']):
+                    if re.search('Debug capture physical is not active', verify_stopped_task['output']):
                         stopped = True
                         event = verify_stopped_task['description']
                         logger.error('{} - {}'.format(log_id, event))
@@ -1256,13 +1279,15 @@ debug capture data physical show
                     # Store task information #
                     # ---------------------- #
                     verify_stopped_task['task'] = 'Verify stopped'
+                    task_timestamp = datetime.now()
+                    verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                     if got_device_index:
-                        job_info[device_index]['tasks'].append(verify_stopped_task.copy())
+                        devices_info['devices'][device_index]['tasks'].append(verify_stopped_task.copy())
 
                         device_status = verify_stopped_task['status']
                         last_description = verify_stopped_task['description']
                     else:
-                        event = 'Did not find device in previous job tasks!'
+                        event = 'Did not find device in previously tracked devices!'
                         logger.warning('{} - {}'.format(log_id, event))
 
                     attempt += 1
@@ -1271,15 +1296,16 @@ debug capture data physical show
             # Store task information at device level #
             # -------------------------------------- #
             if got_device_index:
-                job_info[device_index]['status'] = device_status
-                job_info[device_index]['description'] = last_description
+                devices_info['devices'][device_index]['status'] = device_status
+                devices_info['devices'][device_index]['description'] = last_description
 
                 if not stopped:
-                    job_info[device_index]['severity'] = 'MAJOR'
+                    devices_info['devices'][device_index]['severity'] = 'MAJOR'
                 else:
-                    job_info[device_index]['severity'] = 'NORMAL'
+                    devices_info['devices'][device_index]['state'] = 'not active'
+                    devices_info['devices'][device_index]['severity'] = 'NORMAL'
             else:
-                event = 'Did not find device in previous job tasks!'
+                event = 'Did not find device in previously tracked devices!'
                 logger.warning('{} - {}'.format(log_id, event))
 
         index += 1
@@ -1289,7 +1315,7 @@ debug capture data physical show
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
 
-    return job_info
+    return devices_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: retrieve_capture                                                  #
@@ -1302,13 +1328,13 @@ debug capture data physical show
 #     log_id   - Unique identifier for this devices log entries               #
 #     device   - CPE device to stop network traffic capture on                #
 #     devices  - List of target CPE devices                                   #
-#     job_info - Dictionary of tasks attempted by devices                     #
+#     devices_info - Dictionary of tasks attempted by devices                 #
 #                                                                             #
 # Return:                                                                     #
-#    task_info - Dictionary containing the following sub-dictionary items:    #
-#        'startCapture' returned dictionary (See 'send_cli_script' function call)   #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def retrieve_capture(logger, log_id, device, devices, job_info):
+def retrieve_capture(logger, log_id, device, devices, devices_info):
     """Retrieve the locally stored PCAP file on the device."""
 
     device_found = False
@@ -1323,21 +1349,21 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
 
             print('Retrieving network traffic capture from CPE device #{}: [{}]'.format(index + 1, this_device_address))
 
-            # ------------------------------------------------ #
-            # Track task information to summarize for job info #
-            # ------------------------------------------------ #
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
             device_status = ''
             device_severity = ''
             last_description = ''
 
-            # ------------------------------------------------------- #
-            # Get device index in 'job_info' of device being targeted #
-            # ------------------------------------------------------- #
+            # ---------------------------------------------------- #
+            # Get index in 'devices_info' of device being targeted #
+            # ---------------------------------------------------- #
             got_device_index = False
             device_index = 0
-            while device_index < len(job_info) and not got_device_index:
-                if job_info[device_index]['device'] == device:
-                    event = 'Found device in job_info dictionary at index: [{}]'.format(device_index)
+            while device_index < len(devices_info['devices']) and not got_device_index:
+                if devices_info['devices'][device_index]['device'] == device:
+                    event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
                     logger.debug('{} - {}'.format(log_id, event))
                     got_device_index = True
 
@@ -1357,9 +1383,12 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
 
                 retrieve_capture_task = {}
                 retrieve_capture_task['task'] = 'Retrieve capture'
+                task_timestamp = datetime.now()
+                retrieve_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
 
                 ssh = paramiko.SSHClient()
-                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                #ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
                 try:
                     ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
                     event = 'Connected to device'
@@ -1401,12 +1430,12 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
                     # ---------------------- #
                     # Store task information #
                     # ---------------------- #
-                    job_info[device_index]['tasks'].append(retrieve_capture_task.copy())
+                    devices_info['devices'][device_index]['tasks'].append(retrieve_capture_task.copy())
                     if got_device_index:
                         device_status = retrieve_capture_task['status']
                         last_description = retrieve_capture_task['description']
                     else:
-                        event = 'Did not find device in previous job tasks!'
+                        event = 'Did not find device in previously tracked devices!'
                         logger.warning('{} - {}'.format(log_id, event))
 
                 attempt += 1
@@ -1427,15 +1456,15 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
             # Store task information at device level #
             # -------------------------------------- #
             if got_device_index:
-                job_info[device_index]['status'] = device_status
-                job_info[device_index]['description'] = last_description
+                devices_info['devices'][device_index]['status'] = device_status
+                devices_info['devices'][device_index]['description'] = last_description
 
                 if not retrieved:
-                    job_info[device_index]['severity'] = 'CRITICAL'
+                    devices_info['devices'][device_index]['severity'] = 'CRITICAL'
                 else:
-                    job_info[device_index]['severity'] = 'NORMAL'
+                    devices_info['devices'][device_index]['severity'] = 'NORMAL'
             else:
-                event = 'Did not find device in previous job tasks!'
+                event = 'Did not find device in previously tracked devices!'
                 logger.warning('{} - {}'.format(log_id, event))
 
         index += 1
@@ -1445,7 +1474,7 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
 
-    return job_info
+    return devices_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: process_message                                                   #
@@ -1465,15 +1494,39 @@ def retrieve_capture(logger, log_id, device, devices, job_info):
 def process_message(logger, log_id, message):
     """Parse the elements of a message and add to a dictionary."""
 
+    event = 'Received Message:\n{}'.format(message)
+    logger.debug('{} - {}'.format(log_id, event))
+
     msg_info = {}
 
-    if re.match('New Alarm -', message):
+    if re.search('New Alarm -', message):
         msg_info['type'] = 'alarm'
 
-        msg_items = message.split(': ')
-        if len(msg_items) > 0:
-            msg_info['timestamp'] = msg_items[0]
-            msg_info['alarm'] = msg_items[1].split(' - ')[1]
+        event = 'Matched OVOC alarm'
+        logger.debug('{} - {}'.format(log_id, event))
+
+        #msg_items = message.split(',')
+        #if len(msg_items) > 0:
+        #    msg_info['timestamp'] = msg_items[0]
+        #    msg_info['alarm'] = msg_items[1].split(' - ')[1]
+
+        #match = re.search('<\d+>(.*?)\s*:\s*(New Alarm)\s*-\s*(.*?),\s*(.*)\s*(Source):(.*?),\s*(Description):(.*?),\s*(Device Name):(.*?),\s*(Tenant):(.*?),\s*(Region):(.*?),\s*(IP Address):(.*?),\s*(Device Type):(.*?),\s*(Device Serial):(.*?),\s*(Device Description):(.*)\\x\d+', message)
+
+        match = re.search('<\d+>(.*?)\s*:\s*New Alarm\s*-\s*(.*?),\s*(.*)\s*Source:(.*?),\s*Description:(.*?),\s*Device Name:(.*?),\s*Tenant:(.*?),\s*Region:(.*?),\s*IP Address:(.*?),\s*Device Type:(.*?),\s*Device Serial:(.*?),\s*Device Description:(.*)\x00', message)
+
+        if match:
+            msg_info['timestamp'] = match.group(1).strip()
+            msg_info['alarmType'] = match.group(2).strip()
+            msg_info['alarmMessage'] = match.group(3).strip()
+            msg_info['alarmSource'] = match.group(4).strip()
+            msg_info['alarm'] = match.group(5).strip()
+            msg_info['deviceName'] = match.group(6).strip()
+            msg_info['tenant'] = match.group(7).strip()
+            msg_info['region'] = match.group(8).strip()
+            msg_info['ipAddress'] = match.group(9).strip()
+            msg_info['deviceType'] = match.group(10).strip()
+            msg_info['deviceSerial'] = match.group(11).strip()
+            msg_info['deviceDescription'] = match.group(12).strip()
 
     event = 'Parsed message elements:\n{}'.format(json.dumps(msg_info, indent=4))
     logger.debug('{} - {}'.format(log_id, event))
@@ -1492,7 +1545,7 @@ def process_message(logger, log_id, message):
 #     log_id   - Unique identifier for this devices log entries               #
 #     output   - Flag to indicate if CSV will be written or not               #
 #     tstamp   - Timestamp used to make filename of CSV file unique           #
-#     job_info - Dictionary containing all files and tasks processed          #
+#     devices_info - Dictionary of tasks attempted by devices                 #
 #                                                                             #
 # Return:                                                                     #
 #     csv_records - List of CSV line dictionary records.                      #
@@ -1696,10 +1749,35 @@ def main(argv):
     # ----------------------------- #
     pathlib.Path('./captures').mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------- #
-    # Initialize job information dictionary #
-    # ------------------------------------- #
-    job_info = {}
+    # ------------------------------------------------------------------ #
+    # Initialize devices information dictionary. The dictionary be built #
+    # with the following structure:                                      #
+    # {                                                                  #
+    #     "devices": [                                                   #
+    #         {                                                          #
+    #             "device": "<device ip address>",                       #
+    #             "status": "Success|Failure",                           #
+    #             "description": "<some description>",                   #
+    #             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",             #
+    #             "tasks": [                                             #
+    #                 {                                                  #
+    #                     "task": "<task name>"                          #
+    #                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",         #
+    #                     "status": "Success|Failure",                   #
+    #                     "statusCode": <http response status code>,     #
+    #                     "output": "<CLI script execution>",            #
+    #                     "description": "<CLI script load status>",     #
+    #                 },                                                 #
+    #                 ...                                                #
+    #                 <Next Task>                                        #
+    #             ]                                                      #
+    #         },                                                         #
+    #         ...                                                        #
+    #         <Next Device>                                              #
+    #     ]                                                              #
+    # }                                                                  #
+    # ------------------------------------------------------------------ #
+    devices_info = {}
 
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
@@ -1736,13 +1814,13 @@ def main(argv):
     # ----------------------------------------- #
     # Start captures on all defined CPE devices #
     # ----------------------------------------- #
-    job_info = start_captures(logger, log_id, cpe_devices)
+    devices_info = start_captures(logger, log_id, cpe_devices)
 
     # ------------------------------------------ #
     # For debugging - Output returned 'job_info' #
     # dictionary containing all tasks in job.    #
     # ------------------------------------------ #
-    event = 'Job Info:\n{}'.format(json.dumps(job_info, indent=4))
+    event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
     logger.debug('{} - {}'.format(log_id, event))
 
     # ------------------------------------------ #
@@ -1754,12 +1832,12 @@ def main(argv):
     # ------------------------------------------ #
     buffer_size = 1024
 
-    # ------------------------------------ #
-    # Create a UDP datagram socket for any #
-    # IPv4 interface on this host.         #
-    # ------------------------------------ #
-    udp_server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+    # -------------------------------------- #
+    # Create a UDP datagram socket to listen #
+    # on any IPv4 interface on this host.    #
+    # -------------------------------------- #
     try:
+        udp_server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
         udp_server_socket.bind(('0.0.0.0', listen_port))
     except Exception as err:
         event = '{}'.format(err)
@@ -1768,11 +1846,21 @@ def main(argv):
 
     else:
 
-        event = 'Listening for OVOC alarms and other messages on UDP port: [{}]'.format(listen_port)
-        logger.info('{} - {}'.format(log_id, event))
-        print('{}'.format(event))
+        success_cnt = 0
+        active_devices = 0
+        events_remaining = 0
+        for device in devices_info['devices']:
+            if device['state'].lower() == 'active':
+                active_devices += 1
+            if device['status'].lower() == 'success':
+                success_cnt += 1
 
-        while(True):
+        if active_devices > 0:
+            event = 'Listening for OVOC alarms and other messages on UDP port: [{}]'.format(listen_port)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+        while (active_devices > 0):
 
             bytes_address_pair = udp_server_socket.recvfrom(buffer_size)
             message = bytes_address_pair[0]
@@ -1794,22 +1882,25 @@ def main(argv):
             # -------------------------- #
             # Stop capture on CPE device #
             # -------------------------- #
-            #job_info = stop_capture(logger, log_id, device_with_alarm, cpe_devices, job_info)
+            #devices_info = stop_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
 
             # ------------------------------------- #
             # Retrieve capture file from CPE device #
             # ------------------------------------- #
-            #job_info = retrieve_capture(logger, log_id, device_with_alarm, cpe_devices, job_info)
+            #devices_info = retrieve_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
 
-    #else:
-    #    event = 'Failed to bind to UDP port: [{}]'.format(listen_port)
-    #    logger.error('{} - {}'.format(log_id, event))
-    #    print('ERROR: {}'.format(event))
+        event = 'All devices have completed'
+        logger.info('{} - {}'.format(log_id, event))
+        print('  - INFO: {}'.format(event))
 
-    # ---------------------- #
-    # Create CSV output file #
-    # ---------------------- #
-    #csv_records = create_csv_file(logger, log_id, output_csv, begin_timestamp, job_info)
+        event = 'Finished'
+        logger.info('{} - {}'.format(log_id, event))
+        print('{}'.format(event))
+
+        # ---------------------- #
+        # Create CSV output file #
+        # ---------------------- #
+        #csv_records = create_csv_file(logger, log_id, output_csv, begin_timestamp, devices_info)
 
     end_time = time.time()
     end_timestamp = datetime.now()
