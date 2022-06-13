@@ -1193,102 +1193,265 @@ def stop_capture(logger, log_id, device, devices, devices_info):
                     logger.debug('{} - {}'.format(log_id, event))
                     got_device_index = True
 
-            # --------------------------------- #
-            # Stop debug capture on this device #
-            # --------------------------------- #
-            submitted = False
-            attempt = 1
-            while attempt <= config.max_retries and not submitted:
+            if got_device_index:
 
-                # --------------------------------------- #
-                # Attempt to stop debug capture on device #
-                # --------------------------------------- #
-                event = 'Attempting to stop debug capture on CPE device...'
-                logger.info('{} - {}'.format(log_id, event))
-                print('  + INFO: {}'.format(event))
-
-                cli_script = """
-debug capture data physical stop
-                """
-                stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
-
-                # ---------------------- #
-                # Store task information #
-                # ---------------------- #
-                stop_capture_task['task'] = 'Stop capture'
-                task_timestamp = datetime.now()
-                stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                if got_device_index:
-                    devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
-
-                    device_status = stop_capture_task['status']
-                    last_description = stop_capture_task['description']
-                else:
-                    event = 'Did not find device in previously tracked devices!'
-                    logger.warning('{} - {}'.format(log_id, event))
-
-                # --------------- #
-                # Display results #
-                # --------------- #
-                event = stop_capture_task['description']
-                if device_status.lower() == 'success':
-                    submitted = True
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
-                else:
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('    - ERROR: {}'.format(event))
-
-                attempt += 1
-
-            stopped = False
-            if submitted:
+                # --------------------------------- #
+                # Stop debug capture on this device #
+                # --------------------------------- #
+                submitted = False
                 attempt = 1
-                while attempt <= config.max_retries and not stopped:
-                    # --------------------------------- #
-                    # Attempt to verify capture stopped #
-                    # --------------------------------- #
-                    event = 'Verifying debug capture stopped...'
+                while attempt <= config.max_retries and not submitted:
+
+                    # --------------------------------------- #
+                    # Attempt to stop debug capture on device #
+                    # --------------------------------------- #
+                    event = 'Attempting to stop debug capture on CPE device...'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + INFO: {}'.format(event))
 
                     cli_script = """
-debug capture data physical show
+debug capture data physical stop
                     """
-                    verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
-
-                    # --------------- #
-                    # Display results #
-                    # --------------- #
-                    if re.search('Debug capture physical is not active', verify_stopped_task['output']):
-                        stopped = True
-                        event = verify_stopped_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
-                        event = 'Debug capture is not active.'
-                        verify_stopped_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    else:
-                        event = verify_stopped_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - ERROR: {}'.format(event))
+                    stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                     # ---------------------- #
                     # Store task information #
                     # ---------------------- #
-                    verify_stopped_task['task'] = 'Verify stopped'
+                    stop_capture_task['task'] = 'Stop capture'
                     task_timestamp = datetime.now()
-                    verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    if got_device_index:
+                    stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
+
+                    device_status = stop_capture_task['status']
+                    last_description = stop_capture_task['description']
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    event = stop_capture_task['description']
+                    if device_status.lower() == 'success':
+                        submitted = True
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+                    else:
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+
+                    attempt += 1
+
+                stopped = False
+                if submitted:
+                    attempt = 1
+                    while attempt <= config.max_retries and not stopped:
+                        # --------------------------------- #
+                        # Attempt to verify capture stopped #
+                        # --------------------------------- #
+                        event = 'Verifying debug capture stopped...'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('  + INFO: {}'.format(event))
+
+                        cli_script = """
+debug capture data physical show
+                        """
+                        verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                        # --------------- #
+                        # Display results #
+                        # --------------- #
+                        if re.search('Debug capture physical is not active', verify_stopped_task['output']):
+                            stopped = True
+                            event = verify_stopped_task['description']
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - INFO: {}'.format(event))
+
+                            event = 'Debug capture is not active.'
+                            verify_stopped_task['description'] = event
+                            logger.info('{} - {}'.format(log_id, event))
+                            print('    - INFO: {}'.format(event))
+                        else:
+                            event = verify_stopped_task['description']
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {}'.format(event))
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        verify_stopped_task['task'] = 'Verify stopped'
+                        task_timestamp = datetime.now()
+                        verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                         devices_info['devices'][device_index]['tasks'].append(verify_stopped_task.copy())
 
                         device_status = verify_stopped_task['status']
                         last_description = verify_stopped_task['description']
+
+                    attempt += 1
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            if got_device_index:
+                devices_info['devices'][device_index]['status'] = device_status
+                devices_info['devices'][device_index]['description'] = last_description
+
+                if not stopped:
+                    devices_info['devices'][device_index]['severity'] = 'MAJOR'
+                else:
+                    devices_info['devices'][device_index]['state'] = 'not active'
+                    devices_info['devices'][device_index]['severity'] = 'NORMAL'
+            else:
+                event = 'Did not find device in previously tracked devices!'
+                logger.warning('{} - {}'.format(log_id, event))
+
+        index += 1
+
+    if not device_found:
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
+
+    return devices_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: start_capture                                                     #
+#                                                                             #
+# Stop network traffic captures on a specifc CPE device. The captures are     #
+# stopped by sending the appropriate CLI script command to the devices using  #
+# a REST API request.                                                         #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger   - File handler for storing logged actions                      #
+#     log_id   - Unique identifier for this devices log entries               #
+#     device   - CPE device to stop network traffic capture on                #
+#     devices  - List of target CPE devices                                   #
+#     devices_info - Dictionary of tasks attempted by devices                 #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def stop_capture(logger, log_id, device, devices, devices_info):
+    """Stop network traffic capture on specific device in the 'devices' list."""
+
+    device_found = False
+    index = 0
+    for this_device in devices:
+        if this_device['address'] == device:
+
+            device_found = True
+            this_device_address = this_device['address']
+            this_device_username = this_device['username']
+            this_device_password = this_device['password']
+
+            print('Stopping network traffic capture on CPE device #{}: [{}]'.format(index + 1, this_device_address))
+
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
+            device_status = ''
+            device_severity = ''
+            last_description = ''
+
+            # ---------------------------------------------------- #
+            # Get index in 'devices_info' of device being targeted #
+            # ---------------------------------------------------- #
+            got_device_index = False
+            device_index = 0
+            while device_index < len(devices_info['devices']) and not got_device_index:
+                if devices_info['devices'][device_index]['device'] == device:
+                    event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+                    logger.debug('{} - {}'.format(log_id, event))
+                    got_device_index = True
+
+            if got_device_index:
+
+                # --------------------------------- #
+                # Stop debug capture on this device #
+                # --------------------------------- #
+                submitted = False
+                attempt = 1
+                while attempt <= config.max_retries and not submitted:
+
+                    # --------------------------------------- #
+                    # Attempt to stop debug capture on device #
+                    # --------------------------------------- #
+                    event = 'Attempting to stop debug capture on CPE device...'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + INFO: {}'.format(event))
+
+                    cli_script = """
+debug capture data physical stop
+                    """
+                    stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                    # ---------------------- #
+                    # Store task information #
+                    # ---------------------- #
+                    stop_capture_task['task'] = 'Stop capture'
+                    task_timestamp = datetime.now()
+                    stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
+
+                    device_status = stop_capture_task['status']
+                    last_description = stop_capture_task['description']
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    event = stop_capture_task['description']
+                    if device_status.lower() == 'success':
+                        submitted = True
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
                     else:
-                        event = 'Did not find device in previously tracked devices!'
-                        logger.warning('{} - {}'.format(log_id, event))
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+
+                    attempt += 1
+
+                stopped = False
+                if submitted:
+                    attempt = 1
+                    while attempt <= config.max_retries and not stopped:
+                        # --------------------------------- #
+                        # Attempt to verify capture stopped #
+                        # --------------------------------- #
+                        event = 'Verifying debug capture stopped...'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('  + INFO: {}'.format(event))
+
+                        cli_script = """
+debug capture data physical show
+                        """
+                        verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+
+                        # --------------- #
+                        # Display results #
+                        # --------------- #
+                        if re.search('Debug capture physical is not active', verify_stopped_task['output']):
+                            stopped = True
+                            event = verify_stopped_task['description']
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - INFO: {}'.format(event))
+
+                            event = 'Debug capture is not active.'
+                            verify_stopped_task['description'] = event
+                            logger.info('{} - {}'.format(log_id, event))
+                            print('    - INFO: {}'.format(event))
+                        else:
+                            event = verify_stopped_task['description']
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {}'.format(event))
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        verify_stopped_task['task'] = 'Verify stopped'
+                        task_timestamp = datetime.now()
+                        verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                        devices_info['devices'][device_index]['tasks'].append(verify_stopped_task.copy())
+
+                        device_status = verify_stopped_task['status']
+                        last_description = verify_stopped_task['description']
 
                     attempt += 1
 
@@ -1367,90 +1530,88 @@ def retrieve_capture(logger, log_id, device, devices, devices_info):
                     logger.debug('{} - {}'.format(log_id, event))
                     got_device_index = True
 
-            # ------------------------------------------------- #
-            # Retrieve debug capture file stored on this device #
-            # ------------------------------------------------- #
-            retrieved = False
-            attempt = 1
-            while attempt <= config.max_retries and not retrieved:
+            if got_device_index:
 
-                # -------------------------------------------------- #
-                # Attempt to retrieve debug capture file from device #
-                # -------------------------------------------------- #
-                event = 'Attempting to retrieve debug capture file from CPE device...'
-                logger.info('{} - {}'.format(log_id, event))
-                print('  + INFO: {}'.format(event))
+                # ------------------------------------------------- #
+                # Retrieve debug capture file stored on this device #
+                # ------------------------------------------------- #
+                retrieved = False
+                attempt = 1
+                while attempt <= config.max_retries and not retrieved:
 
-                retrieve_capture_task = {}
-                retrieve_capture_task['task'] = 'Retrieve capture'
-                task_timestamp = datetime.now()
-                retrieve_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-
-                ssh = paramiko.SSHClient()
-                #ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
-                try:
-                    ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
-                    event = 'Connected to device'
+                    # -------------------------------------------------- #
+                    # Attempt to retrieve debug capture file from device #
+                    # -------------------------------------------------- #
+                    event = 'Attempting to retrieve debug capture file from CPE device...'
                     logger.info('{} - {}'.format(log_id, event))
-                    sftp = ssh.open_sftp()
-                    event = 'Successfully started SFTP session'
-                    logger.info('{} - {}'.format(log_id, event))
-                except Exception as err:
-                    event = '{}'.format(err)
-                    logger.error('{} - {}'.format(log_id, event))
-                    print("  - Error: {}".format(event))
+                    print('  + INFO: {}'.format(event))
 
-                else:
-                    # -------------------------------- #
-                    # Create filename to store pcap as #
-                    # -------------------------------- #
-                    file_timestamp = datetime.now()
-                    file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
-                    filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
-                    filename = re.sub(':', '.', filename)
+                    retrieve_capture_task = {}
+                    retrieve_capture_task['task'] = 'Retrieve capture'
+                    retrieve_capture_task['description'] = 'Failed to retrieve capture from device!'
+                    task_timestamp = datetime.now()
+                    retrieve_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
 
-                    remote_file = '/debug-capture/debug-capture-data.pcap'
-                    local_file = './captures/' + filename
-
+                    ssh = paramiko.SSHClient()
+                    #ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
                     try:
-                        sftp.get(remote_file, local_file, prefetch=False)
+                        ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
+                        event = 'Connected to device'
+                        logger.info('{} - {}'.format(log_id, event))
+                        sftp = ssh.open_sftp()
+                        event = 'Successfully started SFTP session'
+                        logger.info('{} - {}'.format(log_id, event))
                     except Exception as err:
                         event = '{}'.format(err)
                         logger.error('{} - {}'.format(log_id, event))
-                        retrieve_capture_task['status'] = 'Failure'
-                        #retrieve_capture_task['description'] = 'Failed to retrieve capture from device!'
-                        retrieve_capture_task['description'] = event
                         print("  - Error: {}".format(event))
-                    else:
-                        retrieve_capture_task['status'] = 'Success'
-                        retrieve_capture_task['description'] = 'Stored capture from device as file: [{}]'.format(filename)
-                        retrieved = True
 
-                    # ---------------------- #
-                    # Store task information #
-                    # ---------------------- #
-                    devices_info['devices'][device_index]['tasks'].append(retrieve_capture_task.copy())
-                    if got_device_index:
+                    else:
+                        # -------------------------------- #
+                        # Create filename to store pcap as #
+                        # -------------------------------- #
+                        file_timestamp = datetime.now()
+                        file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
+                        filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
+                        filename = re.sub(':', '.', filename)
+
+                        remote_file = '/debug-capture/debug-capture-data.pcap'
+                        local_file = './captures/' + filename
+
+                        try:
+                            sftp.get(remote_file, local_file, prefetch=False)
+                        except Exception as err:
+                            event = '{}'.format(err)
+                            logger.error('{} - {}'.format(log_id, event))
+                            retrieve_capture_task['status'] = 'Failure'
+                            retrieve_capture_task['description'] = event
+                            print("  - Error: {}".format(event))
+                        else:
+                            retrieve_capture_task['status'] = 'Success'
+                            retrieve_capture_task['description'] = 'Stored capture from device as file: [{}]'.format(filename)
+                            retrieved = True
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        devices_info['devices'][device_index]['tasks'].append(retrieve_capture_task.copy())
                         device_status = retrieve_capture_task['status']
                         last_description = retrieve_capture_task['description']
+
+                    attempt += 1
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    event = retrieve_capture_task['description']
+                    if device_status.lower() == 'success':
+                        submitted = True
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
                     else:
-                        event = 'Did not find device in previously tracked devices!'
-                        logger.warning('{} - {}'.format(log_id, event))
-
-                attempt += 1
-
-                # --------------- #
-                # Display results #
-                # --------------- #
-                event = retrieve_capture_task['description']
-                if device_status.lower() == 'success':
-                    submitted = True
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
-                else:
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('    - ERROR: {}'.format(event))
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
 
             # -------------------------------------- #
             # Store task information at device level #
@@ -1494,6 +1655,7 @@ def retrieve_capture(logger, log_id, device, devices, devices_info):
 def process_message(logger, log_id, message):
     """Parse the elements of a message and add to a dictionary."""
 
+    message = message.rstrip('\x00')
     event = 'Received Message:\n{}'.format(message)
     logger.debug('{} - {}'.format(log_id, event))
 
@@ -1505,14 +1667,7 @@ def process_message(logger, log_id, message):
         event = 'Matched OVOC alarm'
         logger.debug('{} - {}'.format(log_id, event))
 
-        #msg_items = message.split(',')
-        #if len(msg_items) > 0:
-        #    msg_info['timestamp'] = msg_items[0]
-        #    msg_info['alarm'] = msg_items[1].split(' - ')[1]
-
-        #match = re.search('<\d+>(.*?)\s*:\s*(New Alarm)\s*-\s*(.*?),\s*(.*)\s*(Source):(.*?),\s*(Description):(.*?),\s*(Device Name):(.*?),\s*(Tenant):(.*?),\s*(Region):(.*?),\s*(IP Address):(.*?),\s*(Device Type):(.*?),\s*(Device Serial):(.*?),\s*(Device Description):(.*)\\x\d+', message)
-
-        match = re.search('<\d+>(.*?)\s*:\s*New Alarm\s*-\s*(.*?),\s*(.*)\s*Source:(.*?),\s*Description:(.*?),\s*Device Name:(.*?),\s*Tenant:(.*?),\s*Region:(.*?),\s*IP Address:(.*?),\s*Device Type:(.*?),\s*Device Serial:(.*?),\s*Device Description:(.*)\x00', message)
+        match = re.search('<\d+>(.*?)\s*:\s*New Alarm\s*-\s*(.*?),\s*(.*)\s*Source:(.*?),\s*Description:(.*?),\s*Device Name:(.*?),\s*Tenant:(.*?),\s*Region:(.*?),\s*IP Address:(.*?),\s*Device Type:(.*?),\s*Device Serial:(.*?),\s*Device Description:(.*$)', message)
 
         if match:
             msg_info['timestamp'] = match.group(1).strip()
@@ -1871,23 +2026,32 @@ def main(argv):
             # ------------------------ #
             msg_info = process_message(logger, log_id, message.decode('utf-8'))
 
-            clientMsg = "Message from Client: {}".format(message)
-            clientIP  = "Client IP Address: {}".format(address[0])
+            if msg_info['type'] == 'alarm':
+                if msg_info['alarmType'].lower() == 'connection alarm' and \
+                   msg_info['alarm'].lower() == 'connection lost':
 
-            print(clientMsg)
-            print(clientIP)
+                    device_with_alarm = msg_info['ipAddress']
 
-            #device_with_alarm = '192.168.200.218'
+                    event = 'Received [{}] alarm from device: [{}]'.format(msg_info['alarm'], device_with_alarm)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
 
-            # -------------------------- #
-            # Stop capture on CPE device #
-            # -------------------------- #
-            #devices_info = stop_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
+                    # -------------------------- #
+                    # Stop capture on CPE device #
+                    # -------------------------- #
+                    devices_info = stop_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
 
-            # ------------------------------------- #
-            # Retrieve capture file from CPE device #
-            # ------------------------------------- #
-            #devices_info = retrieve_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
+                    # ------------------------------------- #
+                    # Retrieve capture file from CPE device #
+                    # ------------------------------------- #
+                    devices_info = retrieve_capture(logger, log_id, device_with_alarm, cpe_devices, devices_info)
+
+
+            #clientMsg = "Message from Client: {}".format(message)
+            #clientIP  = "Client IP Address: {}".format(address[0])
+
+            #print(clientMsg)
+            #print(clientIP)
 
         event = 'All devices have completed'
         logger.info('{} - {}'.format(log_id, event))
