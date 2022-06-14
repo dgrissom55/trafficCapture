@@ -14,7 +14,7 @@ storage_dir = './logs'
 # Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL          #
 # ---------------------------------------------------------- #
 app_log_level = 'DEBUG'
-app_log_file = 'capture.log'
+app_log_file = 'ovoc_capture_app.log'
 
 # ---------------------------------------------------------------------- #
 # Log files over 'app_max_log_file_size' (in megabytes) are rotated. The #
@@ -33,33 +33,15 @@ listen_port = 20001
 
 # ------------------------------------------------------------------- #
 # UDP port that the complementary traffic capture Python script on    #
-# the OVOC server is listening on. Commands are sent to the OVOC app  #
-# to start and stop traffic captures for the targeted CPE devices.    #
+# the CPE controlling server is listening on. Command responses are   #
+# sent to the CPE app when starting and stopping 'tcpdump' traffic    #
+# captures for the targeted CPE devices.                              #
 # ------------------------------------------------------------------- #
-ovoc_listen_port = 20001
+cpe_listen_port = 20001
 
 # ------------------------------------------------------------------- #
-# Max retries for failed REST API requests.                           #
+# Max retries for failed attempts to spawn 'tcpdump' captures.        #
 # NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
-max_retries = 10
-
-# ------------------------------------------------------------------- #
-# Max events per device. After the max events have been triggered on  #
-# all of the devices, the application will exit.                      #
-# NOTE: This value can be set via interactive entry from this script. #
-# ------------------------------------------------------------------- #
-max_events_per_device = 1
-
-# ------------------------------------------------------------------- #
-# List of targeted CPE devices.                                       #
-# NOTE: This value can be set via interactive entry from this script. #
-# ------------------------------------------------------------------- #
-cpe_devices = [
-    {
-        "device": "192.168.200.218",
-        "username": "Admin",
-        "ovoc": "192.168.200.252"
-    }
-]
+max_retries = 2
 

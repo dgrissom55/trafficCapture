@@ -1,15 +1,15 @@
-"""CPE APP: Syncrhonize network captures between OVOC server and CPE device."""
+"""OVOC APP: Syncrhonize network captures between OVOC server and CPE device."""
 
 """
 -------------------------------------------------------------------------------
-Script: cpe_capture_app.py
+Script: ovoc_capture_app.py
 
 Description:
 
-This script starts network traffic captures on both targeted audiocodes CPE 
-devices and their associated OVOC servers. The traffic captures are started
-on the CPE and the associated OVOC server and terminate after receiving a
-'Connection Lost' SNMP alarm from the OVOC server that manages the CPE.
+This script starts a UDP listener server on an OVOC server and waits for
+command messages from a 'cpe_capture_app.py' script. The commands received
+tell this script to trigger a 'tcpdump' application filtering on a specific
+CPE device.
 
 There are a mimimum of two scripts that will be required to be run.
 
@@ -25,6 +25,10 @@ There are a mimimum of two scripts that will be required to be run.
                          with 'root' privileges since it will issue system
                          calls to start the linux 'tcpdump' application.)
 
+This script can be run simultaneously on several OVOC servers if needed,
+depending on the list of CPE devices entered in the 'cpe_capture_app.py'
+target devices list.
+
 Running the 'cpe_capture_app.py' script on a separate server other than an
 OVOC server is required since the goal is to understand why an OVOC server
 may be losing connectivity to the CPE devices. The intent is that the
@@ -35,26 +39,25 @@ and retrieve debug captures without failure.
 The goal is the attempt catch an event where SNMP traffic is not being seen
 on the CPE device and it loses management connectivity with the OVOC server.
 
-A major part of the interactive input to this script is the creation of a 
-list of CPE devices and their associated OVOC servers. The commands to 
-start/stop the debug capture on the audiocodes CPE is sent via REST API to
-the devices defined from the interactive entries. The traffic captures on
-the CPE's associated OVOC servers are started and stopped using UDP signaling.
-Commands are sent from this script to the 'ovoc_listen_port' defined for
-the complementatry Python script ('ovoc_capture_app.py') running on the
-appropriate OVOC servers.
+The traffic captures on the OVOC servers running this script are started
+and stopped using UDP signalled commands from the 'cpe_capture_app.py'
+script. Commands are sent to this script to the 'listen_port' defined for in
+this scripts 'ovoc_config.py' file.
 
 On the OVOC servers, the network captures are performed by issuing system
-calls to the 'tcpdump' app. To start a capture on the OVOC server, this script
-sends a 'CAPTURE' command to OVOC to inform it which CPE traffic should be
-captured. The OVOC responds with a 'TRYING' when setting up the tcpdump, and
-an 'OK' when the tcpdump process is running. The captures are stopped on the
-OVOC after this script receives the 'Connection Lost' SNMP alarm. This script
-will send a 'STOP' message to the OVOC server to trigger it to kill the
-tcpdump process for that CPE device. The following messages are exchanged:
+calls to the 'tcpdump' app. To start a capture on an OVOC server, this script
+receives a 'CAPTURE' command sent from the CPE controller app to inform this
+OVOC server of which CPE traffic should be filtered and captured using
+'tcpdump'. This OVOC capture app script responds with a 'TRYING' when setting
+up the tcpdump, and an 'OK' when the tcpdump process is running. The captures
+are stopped on this OVOC server after the CPE controller app script
+'cpe_capture_app.py' receives the 'Connection Lost' SNMP alarm. That CPE app
+script will send a 'STOP' command to the appropriate OVOC server app that 
+will trigger this script to kill the tcpdump process for that CPE device.
+The following messages are exchanged:
 
 
-  This script                                 OVOC server
+  CPE script                                 This script
        |                                           |
        |----- CAPTURE <address of CPE device> ---->|
        |                                           |
@@ -112,33 +115,40 @@ import re
 import csv
 import json
 import logging
-import requests
-import base64
 import json
 import time
 import socket
-import urllib3
 import gzip
 import shutil
-import pathlib
-import paramiko
+#import pathlib
 
 from datetime import datetime
 from getpass import getpass
 
-assert sys.version_info >= (3, 6), "Use Python 3.6 or newer"
+# Import ovoc_app_config.py
+import ovoc_app_config
 
-# Import cpe_app_config.py
-import cpe_app_config
-
-urllib3.disable_warnings()
+# ------------------------------ #
+# Check for root user privileges #
+# ------------------------------ #
+if os.geteuid() != 0:
+    event = 'Must be root user to run this script!'
+    print('ERROR: {}'.format(event))
+    exit(1)
 
 # ---------------------------- #
 # Log File Format and Settings #
 # ---------------------------- #
-pathlib.Path(cpe_app_config.storage_dir).mkdir(parents=True, exist_ok=True)
-app_log_level = cpe_app_config.app_log_level
-app_log_file = cpe_app_config.storage_dir + '/' + cpe_app_config.app_log_file
+#pathlib.Path(ovoc_app_config.storage_dir).mkdir(parents=True, exist_ok=True)
+try:
+    if not os.path.isdir(ovoc_app_config.storage_dir):
+        os.makedirs(ovoc_app_config.storage_dir)
+        print('Log directory [{}] created successfully.'.format(ovoc_app_config.storage_dir))
+except OSError as error:
+    print('Log directory [{}] can not be created!'.format(ovoc_app_config.storage_dir))
+    exit(1)
+app_log_level = ovoc_app_config.app_log_level
+app_log_file = ovoc_app_config.storage_dir + '/' + ovoc_app_config.app_log_file
 app_log_handler = logging.FileHandler(app_log_file)
 app_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-8s] %(message)s", datefmt='%d-%b-%Y %H:%M:%S'))
 logger = logging.getLogger('trafficCapture')
@@ -156,11 +166,11 @@ log_id = '[SID=' + str(os.getpid()) + ']'
 # Check to see if the logs files need to be rotated due to the 'current' log  #
 # log size being >= '???_max_log_file_size' parameter. The total number of    #
 # archived log files is set by the parameter '???_archived_files'. These      #
-# parameters are defined in the 'cpe_app_config.py' file and passed to the    #
+# parameters are defined in the 'ovoc_app_config.py' file and passed to the   #
 # function as argument parameters.                                            #
 #                                                                             #
 # The 'current' log file path and basename are also defined in the            #
-# 'cpe_app_config.py' configuration file. The log file is passed into this    #
+# 'ovoc_app_config.py' configuration file. The log file is passed into this   #
 # function as a parameter as well.                                            #
 #                                                                             #
 # Parameters:                                                                 #
@@ -181,7 +191,7 @@ def rotate_logs(logger, log_id, log_file, max_size, archived_files):
     # ------------------------------------------- #
     # Append storage directory to 'log_file' name #
     # ------------------------------------------- #
-    log_file = cpe_app_config.storage_dir + '/' + log_file
+    log_file = ovoc_app_config.storage_dir + '/' + log_file
 
     # --------------------------- #
     # Check current log file size #
@@ -281,60 +291,6 @@ def rotate_logs(logger, log_id, log_file, max_size, archived_files):
                 logger.error('{} - {}'.format(log_id, event))
 
     return status
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: send_rest                                                         #
-#                                                                             #
-# Send REST API request to server and return response.                        #
-#                                                                             #
-# Parameters:                                                                 #
-#    method    - HTML method type: GET, PUT, or POST                          #
-#    url       - Location to send REST request                                #
-#    username  - Username for REST authentication on OVOC server              #
-#    password  - Password for REST authentication on OVOC server              #
-#    data      - data formatted according to 'data_type' to send to           #
-#                OVOC server                                                  #
-#    data_type - Type of data in the 'data' parameter.                        #
-#                Either: 'files' or 'json'                                    #
-#                    'files' sends 'Content-Type: multipart/form-data'        #
-#                    'json'  sends 'Content-Type: application/json'           #
-#                                                                             #
-# Return:                                                                     #
-#    response - HTML Response Object that contains elements with the          #
-#               'status code' and response 'text' from OVOC server            #
-# --------------------------------------------------------------------------- #
-def send_rest(method, url, username, password, data=None, data_type='json'):
-    """Send REST API request to server and return response."""
-
-    # ----------------------------- #
-    # Set with Basic Authentication #
-    # ----------------------------- #
-    pwd = username + ':' + password
-    headers = {'Authorization': 'Basic ' + base64.b64encode(pwd.encode('utf-8', 'ignore')).decode('utf-8', 'ignore')}
-
-    # ------------------------------------------ #
-    # Send REST request based on the method type #
-    # ------------------------------------------ #
-    try:
-        if method == 'GET':
-            response = requests.get(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'POST':
-            if data_type == 'json':
-                response = requests.post(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-            elif data_type == 'files':
-                response = requests.post(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'PUT':
-            if data_type == 'json':
-                response = requests.put(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-            elif data_type == 'files':
-                response = requests.put(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-
-    except Exception as err:
-        response = str(err)
-
-    return response
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: send_cli_script                                                   #
@@ -475,31 +431,31 @@ def send_cli_script(logger, log_id, script, device, username, password):
     return task_info
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: send_cmd_request                                                  #
+# FUNCTION: send_cmd_response                                                 #
 #                                                                             #
-# Send a command request to an OVOC capture app script.                       #
+# Send a command response to a CPE capture app script.                        #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger     - File handler for storing logged actions                    #
 #     log_id     - Unique identifier for this devices log entries             #
 #     udp_socket - UDP socket object currenly bound to                        #
-#     request    - Command request sent to OVOC capture app script            #
-#     address    - Address of OVOC capture app to send request to             #
+#     response   - Command message response sent to CPE capture app script    #
+#     address    - Address of CPE capture app to send response to             #
 #                                                                             #
 # Return:                                                                     #
 #    status - Boolean: 'True' for success, 'False' for failure                #
 # --------------------------------------------------------------------------- #
-def send_cmd_request(logger, log_id, udp_socket, request, address):
-    """Send a command request to an OVOC capture app script."""
+def send_cmd_response(logger, log_id, udp_socket, response, address):
+    """Send a command response to a CPE capture app script."""
 
     status = False
 
-    # ------------------------------------------------- #
-    # Send a command request on the UDP datagram socket #
-    # ------------------------------------------------- #
+    # -------------------------------------------------- #
+    # Send a command response on the UDP datagram socket #
+    # -------------------------------------------------- #
     try:
-        this_request = request.encode()
-        udp_socket.sendto(this_request, (address, cpe_app_config.ovoc_listen_port))
+        this_response = response.encode()
+        udp_socket.sendto(this_response, (address, ovoc_app_config.cpe_listen_port))
         status = True
     except Exception as err:
         event = '{}'.format(err)
@@ -509,528 +465,9 @@ def send_cmd_request(logger, log_id, udp_socket, request, address):
     return status
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: validate_address                                                  #
-#                                                                             #
-# Verify that the address entered is either a valid IPv4, IPv6, or FQDN       #
-# address and return the status of the validation.                            #
-#                                                                             #
-# Parameters:                                                                 #
-#     address - IPv4, IPv6, or FQDN address                                   #
-#                                                                             #
-# Return:                                                                     #
-#    valid - Boolean: True for valid, False for invalid                       #
-# --------------------------------------------------------------------------- #
-def validate_address(address):
-    """Verify that the address entered is either a valide IPv4, IPv6, or FQDN."""
-
-    valid = False
-
-    # ----------------- #
-    # Check IPv4 format #
-    # ----------------- #
-    if re.match('^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', address):
-        valid = True
-
-    if not valid:
-        # ----------------- #
-        # Check IPv6 format #
-        # ----------------- #
-        if re.match('^((?=.*::)(?!.*::.+::)(::)?([\dA-F]{1,4}:(:|\b)|){5}|([\dA-F]{1,4}:){6})((([\dA-F]{1,4}((?!\3)::|:\b|$))|(?!\2\3)){2}|(((2[0-4]|1\d|[1-9])?\d|25[0-5])\.?\b){4})$', address):
-            valid = True
-
-    if not valid:
-        # ----------------- #
-        # Check FQDN format #
-        # ----------------- #
-        if re.match('^(?=.{1,254}$)((?=[a-z0-9-]{1,63}\.)(xn--+)?[a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,63}$', address):
-            valid = True
-
-    return valid
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: update_cpe_devices                                                #
-#                                                                             #
-# Update the list of CPE devices stored in the 'cpe_app_config.py' file if    #
-# necessary.                                                                  #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger       - File handler for storing logged actions                  #
-#     log_id       - Unique identifier for this devices log entries           #
-#     cpe_devices  - List of dicitionaries containing targeted CPE devices    #
-#                                                                             #
-# Return:                                                                     #
-#    status - Boolean: Success or failure of the update action.               #
-# --------------------------------------------------------------------------- #
-def update_cpe_devices(logger, log_id, cpe_devices):
-    """Update list of CPE devices in 'cpe_app_config.py' file."""
-
-    status = False
-    do_update = False
-
-    # --------------------------------------------------------- #
-    # Read in current configuration file contents. The contents #
-    # will be modified by REGEX substitutions and written back  #
-    # the the 'cpe_app_config.py' file if differences exist.    #
-    # --------------------------------------------------------- #
-    config_file_contents = ''
-    event = 'Reading contents of "cpe_app_config.py" file.'
-    logger.debug('{} - {}'.format(log_id, event))
-    try:
-        with open('./cpe_app_config.py', 'r') as fp:
-            config_file_contents = fp.read()
-    except Exception as err:
-        event = 'Unable to read "cpe_app_config.py" file - Error: {}'.format(err)
-        logger.error('{} - {}'.format(log_id, event))
-        print('  - ERROR: {}'.format(event))
-
-    else:
-        event = 'Success'
-        logger.debug('{} - {}'.format(log_id, event))
-
-        try:
-            # -------------------------------------------------------------------- #
-            # Iterate over both the entered list of CPE devices and compare it to  #
-            # the list of CPE devices stored in the 'cpe_app_config.py' file.      #
-            # The results of the 'compares iterations below will be > 0 if lists   #
-            # of dictionaries are different.                                       #
-            #                                                                      #
-            # 'cpe_devices' is list of dictionaries from interactive entries.      #
-            # 'config.cpe_devices' is list of dictionaries from the                #
-            # 'cpe_app_config.py' file.                                            #
-            # -------------------------------------------------------------------- #
-            compare_entered_to_stored = [i for i in cpe_devices if i not in cpe_app_config.cpe_devices]
-            compare_stored_to_entered = [i for i in cpe_app_config.cpe_devices if i not in cpe_devices]
-            if len(compare_entered_to_stored) != 0 or len(compare_stored_to_entered) != 0:
-                result = re.sub("(?s)cpe_devices = (\[.*?\])", "cpe_devices = " + json.dumps(cpe_devices, indent=4), config_file_contents, 1)
-
-                if result != config_file_contents:
-                    # ------------------------------------------------- #
-                    # Configuration file contents successfully modified #
-                    # ------------------------------------------------- #
-                    config_file_contents = result
-                    do_update = True
-                    event = 'Updates for list of targeted CPE devices successfully prepared.'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
-                else:
-                    # -------------------------------------------- #
-                    # Failed to modify configuration file contents #
-                    # -------------------------------------------- #
-                    event = 'Failed to prepare updates for list of targeted CPE devices!'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-
-            else:
-                # -------------------- #
-                # No updates necessary #
-                # -------------------- #
-                status = True
-
-        except Exception as err:
-            event = 'Processing Error: {}'.format(err)
-            logger.error('{} - {}'.format(log_id, event))
-            print('  - ERROR: {}'.format(event))
-
-        else:
-            # ------------------------------- #
-            # Save configuration file updates #
-            # ------------------------------- #
-            if do_update:
-                try:
-                    with open('./cpe_app_config.py', 'w') as fp:
-                        fp.write(config_file_contents)
-                    status = True
-                    event = 'Successfully updated "cpe_app_config.py" file'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
-                except Exception as err:
-                    event = 'Unable to write "cpe_app_config.py" file - Error: {}'.format(err)
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-
-    return status
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: get_cpe_devices                                                   #
-#                                                                             #
-# Build list of dictionaries that contains the CPE devices to target for      #
-# network traffic captures. For each CPE device store the IP address or FQDN, #
-# username and password. Any stored CPE devices in the 'cpe_app_config.py'    #
-# file will be presented first and allowed to be modified if necessary.       #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger - File handler for storing logged actions                        #
-#     log_id - Unique identifier for this devices log entries                 #
-#                                                                             #
-# Return:                                                                     #
-#    devices_info - Modified dictionary containing a new record for each      #
-#                   device to target.                                         #
-# --------------------------------------------------------------------------- #
-def get_cpe_devices(logger, log_id):
-    """Build list of CPE devices to target for network captures."""
-    
-    # ------------------------------------------------------------------- #
-    # For each entered device, initialize information dictionary with the #
-    # following items:                                                    #
-    # {                                                                   #
-    #     "devices": [                                                    #
-    #         {                                                           #
-    #             "device": "<device address>",                           #
-    #             "username": "<device REST API username>",               #
-    #             "password": "<device REST API password>",               #
-    #             "ovoc": "<ovoc address>",                               #
-    #             "state": "not active",                                  #
-    #             "ovocState": "not active",                              #
-    #             "events": 0,                                            #
-    #             "tasks": []                                             #
-    #         },                                                          #
-    #         ...                                                         #
-    #         <Next Device>                                               #
-    #     ]                                                               #
-    # }                                                                   #
-    # ------------------------------------------------------------------- #
-    devices_info = {}
-    devices_info['devices'] = []
-
-    # ------------------------------------------------------------ #
-    # This list holds the contents of the created list of CPE      #
-    # devices ('devices_info') without the 'password' field being  #
-    # present. This list will be stored in the 'cpe_app_config.py' #
-    # file for future executions of this script.                   #
-    # ------------------------------------------------------------ #
-    config_cpe_devices = []
-
-    print('')
-    print(':=============================================================:')
-    print(': Create a set of CPE devices to target for network traffic   :')
-    print(': captures. Enter the required information to use when        :')
-    print(': connecting to each device.                                  :')
-    print(':                                                             :')
-    print(': NOTE: Previously entered CPE devices are recalled and can   :')
-    print(': be modified if desired.                                     :')
-    print(':                                                             :')
-    print(': To remove a previously stored device, type "delete" for the :')
-    print(': CPE device address.                                         :')
-    print(':=============================================================:')
-    if len(cpe_app_config.cpe_devices) == 0:
-        event = 'No stored CPE devices were found.'
-        logger.info('{} - {}'.format(log_id, event))
-        print('  - INFO: {}'.format(event))
-
-    stored_device_index = 0
-    used_device_index = 0
-    while len(devices_info['devices']) == 0:
-
-        # ------------------------------------------ #
-        # Get existing CPE devices previously stored #
-        # in the 'cpe_app_config.py' file.           #
-        # ------------------------------------------ #
-        while stored_device_index < len(cpe_app_config.cpe_devices):
-
-            stored_device_address = ''
-            if 'device' in cpe_app_config.cpe_devices[stored_device_index]:
-                stored_device_address = cpe_app_config.cpe_devices[stored_device_index]['device']
-            stored_device_user = ''
-            if 'username' in cpe_app_config.cpe_devices[stored_device_index]:
-                stored_device_user = cpe_app_config.cpe_devices[stored_device_index]['username']
-            stored_ovoc_address = ''
-            if 'ovoc' in cpe_app_config.cpe_devices[stored_device_index]:
-                stored_ovoc_address = cpe_app_config.cpe_devices[stored_device_index]['ovoc']
-
-            event = 'Retrieved stored CPE device address: [{}]'.format(stored_device_address)
-            logger.info('{} - {}'.format(log_id, event))
-            event = 'Retrieved stored CPE device username: [{}]'.format(stored_device_user)
-            logger.info('{} - {}'.format(log_id, event))
-            event = 'Retrieved stored CPE associated OVOC address: [{}]'.format(stored_ovoc_address)
-            logger.info('{} - {}'.format(log_id, event))
-
-            # ------------------------------------------- #
-            # Allow modification of stored device address #
-            # ------------------------------------------- #
-            skip_device = False
-            got_address = False
-            while not got_address:
-                this_device_address = str(input('CPE device #{} IP address or FQDN: (delete) [{}] '.format(used_device_index + 1, stored_device_address))).strip()
-                event = 'Entered CPE device: [{}]'.format(this_device_address)
-                logger.info('{} - {}'.format(log_id, event))
-                if this_device_address == '':
-                    this_device_address = stored_device_address
-                    event = 'Using existing CPE device address: [{}]'.format(this_device_address)
-                    logger.info('{} - {}'.format(log_id, event))
-                    got_address = True
-
-                elif this_device_address.lower() == 'delete':
-                    skip_device = True
-                    got_address = True
-                    event = 'Removed CPE device [{}] from list of targeted devices.'.format(stored_device_address)
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
-
-                else:
-                    # ------------------------------------------------------ #
-                    # Validate entered address is either IPv4, IPv6, or FQDN #
-                    # ------------------------------------------------------ #
-                    valid_address = validate_address(this_device_address)
-                    if valid_address:
-                        event = 'Modifying CPE device address to: [{}]'.format(this_device_address)
-                        logger.info('{} - {}'.format(log_id, event))
-                        got_address = True
-                    else:
-                        event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for accessing the CPE device.'
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {}'.format(event))
-
-            if not skip_device:
-                # -------------------------------------------- #
-                # Allow modification of stored device username #
-                # -------------------------------------------- #
-                this_device_user = str(input('CPE device #{} username: [{}] '.format(used_device_index + 1, stored_device_user))).strip()
-                event = 'Entered CPE device username: [{}]'.format(this_device_user)
-                logger.info('{} - {}'.format(log_id, event))
-                if this_device_user == '':
-                    this_device_user = stored_device_user
-                    event = 'Using existing CPE device username: [{}]'.format(this_device_user)
-                    logger.info('{} - {}'.format(log_id, event))
-                else:
-                    event = 'Modifying CPE device username to: [{}]'.format(this_device_user)
-                    logger.info('{} - {}'.format(log_id, event))
-
-                # ------------------------------ #
-                # Get password for stored device #
-                # ------------------------------ #
-                this_device_pass = ''
-                while this_device_pass == '':
-                    this_device_pass = getpass(prompt='CPE device #{} password: '.format(used_device_index + 1))
-                    this_device_pass_verify = getpass(prompt='Retype password: ')
-                    if this_device_pass != this_device_pass_verify:
-                        event = 'Entered passwords do NOT match.'
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {} Try again.'.format(event))
-                        this_device_pass = ''
-                    else:
-                        if this_device_pass == '':
-                            event = 'Passwords can not be empty!'
-                            logger.error('{} - {}'.format(log_id, event))
-                            print('  - ERROR: {} Try again.'.format(event))
-                        else:
-                            event = 'Entered passwords match!'
-                            logger.info('{} - {}'.format(log_id, event))
-                            print('  - INFO: {}'.format(event))
-
-                # --------------------------- #
-                # Get associated OVOC address #
-                # --------------------------- #
-                got_address = False
-                while not got_address:
-                    this_ovoc_address = str(input('CPE device #{} associated OVOC IP address or FQDN: [{}] '.format(used_device_index + 1, stored_ovoc_address))).strip()
-                    event = 'Entered CPE associated OVOC: [{}]'.format(this_ovoc_address)
-                    logger.info('{} - {}'.format(log_id, event))
-                    if this_ovoc_address == '':
-                        this_ovoc_address = stored_ovoc_address
-                        event = 'Using existing CPE associated OVOC address: [{}]'.format(this_ovoc_address)
-                        logger.info('{} - {}'.format(log_id, event))
-                        got_address = True
-                    else:
-                        # ------------------------------------------------------ #
-                        # Validate entered address is either IPv4, IPv6, or FQDN #
-                        # ------------------------------------------------------ #
-                        valid_address = validate_address(this_ovoc_address)
-                        if valid_address:
-                            event = 'Modifying CPE associated OVOC address to: [{}]'.format(this_ovoc_address)
-                            logger.info('{} - {}'.format(log_id, event))
-                            got_address = True
-                        else:
-                            event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for the CPE associated OVOC address.'
-                            logger.error('{} - {}'.format(log_id, event))
-                            print('  - ERROR: {}'.format(event))
-
-                used_device_index += 1
-
-                # ------------------------ #
-                # Create CPE device record #
-                # ------------------------ #
-                devices_info['devices'].append({})
-                device_index = len(devices_info['devices']) - 1
-                devices_info['devices'][device_index]['device'] = this_device_address
-                devices_info['devices'][device_index]['username'] = this_device_user
-                devices_info['devices'][device_index]['password'] = this_device_pass
-                devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
-                devices_info['devices'][device_index]['tasks'] = []
-
-                # ----------------------------------------------------- #
-                # Default the state to 'not active' to indicate the     #
-                # device is currently not performing a network capture. #
-                # ---------------------------------------------------- #
-                devices_info['devices'][device_index]['state'] = 'not active'
-                devices_info['devices'][device_index]['ovocState'] = 'not active'
-
-                # ------------------------------------------------ #
-                # Default the number of alarm events seen for this #
-                # device to 0. Each device will restart the        #
-                # capture after receiving an alarm from OVOC.      #
-                # ------------------------------------------------ #
-                devices_info['devices'][device_index]['events'] = 0
-
-                # ------------------------------------------------ #
-                # Create OVOC server record to store in the        #
-                # 'cpe_app_config.py' file. Do not store the OVOC  #
-                # password since it would be stored in plain text. #
-                # ------------------------------------------------ #
-                config_cpe_devices.append({})
-                device_index = len(devices_info['devices']) - 1
-                config_cpe_devices[device_index]['device'] = this_device_address
-                config_cpe_devices[device_index]['username'] = this_device_user
-                config_cpe_devices[device_index]['ovoc'] = this_ovoc_address
-
-            stored_device_index += 1
-
-        # ------------------------------ #
-        # Option to add more CPE devices #
-        # ------------------------------ #
-        if len(devices_info['devices']) != 0:
-            print('')
-            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
-            if reply == '':
-                reply = 'n'
-        else:
-            reply = 'y'
-
-        while reply[0] == 'y':
-
-            this_device_address = ''
-            while this_device_address == '':
-                this_device_address = str(input('CPE device #{} IP address or FQDN: '.format(used_device_index + 1))).strip()
-                event = 'Entered CPE device: [{}]'.format(this_device_address)
-                logger.info('{} - {}'.format(log_id, event))
-                # ------------------------------------------------------ #
-                # Validate entered address is either IPv4, IPv6, or FQDN #
-                # ------------------------------------------------------ #
-                valid_address = validate_address(this_device_address)
-                if not valid_address:
-                    event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for accessing the CPE device.'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-                    this_device_address = ''
-
-            event = 'Set new CPE device address to: [{}]'.format(this_device_address)
-            logger.info('{} - {}'.format(log_id, event))
-
-            this_device_user = ''
-            while this_device_user == '':
-                this_device_user = str(input('CPE device #{} username: '.format(used_device_index + 1))).strip()
-                event = 'Entered CPE device username: [{}]'.format(this_device_address)
-                logger.info('{} - {}'.format(log_id, event))
-                if this_device_user == '':
-                    event = 'Must enter a username to use for accessing an account on the CPE device.'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-
-            event = 'Set new CPE device username to: [{}]'.format(this_device_user)
-            logger.info('{} - {}'.format(log_id, event))
-
-            this_device_pass = ''
-            while this_device_pass == '':
-                this_device_pass = getpass(prompt='CPE device #{} password: '.format(used_device_index + 1))
-                this_device_pass_verify = getpass(prompt='Retype password: ')
-                if this_device_pass != this_device_pass_verify:
-                    event = 'Entered passwords to NOT match.'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {} Try again.'.format(event))
-                    this_device_pass = ''
-                else:
-                    if this_device_pass == '':
-                        event = 'Passwords can not be empty!'
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {} Try again.'.format(event))
-                    else:
-                        event = 'Entered passwords match!'
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('  - INFO: {}'.format(event))
-
-            event = 'Set CPE device password.'
-            logger.info('{} - {}'.format(log_id, event))
-
-            this_ovoc_address = ''
-            while this_ovoc_address == '':
-                this_device_address = str(input('CPE device #{} associated OVOC IP address or FQDN: '.format(used_device_index + 1))).strip()
-                event = 'Entered CPE associated OVOC: [{}]'.format(this_ovoc_address)
-                logger.info('{} - {}'.format(log_id, event))
-                # ------------------------------------------------------ #
-                # Validate entered address is either IPv4, IPv6, or FQDN #
-                # ------------------------------------------------------ #
-                valid_address = validate_address(this_ovoc_address)
-                if not valid_address:
-                    event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for the CPE associated OVOC address.'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-                    this_device_address = ''
-
-            event = 'Set new CPE device address to: [{}]'.format(this_device_address)
-            logger.info('{} - {}'.format(log_id, event))
-
-            # ------------------------ #
-            # Create CPE device record #
-            # ------------------------ #
-            devices_info['devices'].append({})
-            device_index = len(devices_info['devices']) - 1
-            devices_info['devices'][device_index]['device'] = this_device_address
-            devices_info['devices'][device_index]['username'] = this_device_user
-            devices_info['devices'][device_index]['password'] = this_device_pass
-            devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
-            devices_info['devices'][device_index]['tasks'] = []
-
-            # ----------------------------------------------------- #
-            # Default the state to 'not active' to indicate the     #
-            # device is currently not performing a network capture. #
-            # ---------------------------------------------------- #
-            devices_info['devices'][device_index]['state'] = 'not active'
-            devices_info['devices'][device_index]['ovocState'] = 'not active'
-
-            # ------------------------------------------------ #
-            # Default the number of alarm events seen for this #
-            # device to 0. Each device will restart the        #
-            # capture after receiving an alarm from OVOC.      #
-            # ------------------------------------------------ #
-            devices_info['devices'][device_index]['events'] = 0
-
-            # ------------------------------------------------ #
-            # Create OVOC server record to store in the        #
-            # 'cpe_app_config.py' file. Do not store the OVOC  #
-            # password since it would be stored in plain text. #
-            # ------------------------------------------------ #
-            config_cpe_devices.append({})
-            device_index = len(devices_info['devices']) - 1
-            config_cpe_devices[device_index]['device'] = this_device_address
-            config_cpe_devices[device_index]['username'] = this_device_user
-            config_cpe_devices[device_index]['ovoc'] = this_ovoc_address
-
-            used_device_index += 1
-
-            print('')
-            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
-
-        if len(devices_info['devices']) == 0:
-            event = 'Must enter at least one CPE device to target for the network traffic capture.'
-            logger.error('{} - {}'.format(log_id, event))
-            print('  - ERROR: {} Try again.'.format(event))
-
-    event = 'Set targeted CPE devices:\n{}'.format(json.dumps(config_cpe_devices, indent=4))
-    logger.debug('{} - {}'.format(log_id, event))
-
-    # -------------------------------------------------------------- #
-    # Check if updates are necessary to the 'cpe_app_config.py' file #
-    # -------------------------------------------------------------- #
-    if not update_cpe_devices(logger, log_id, config_cpe_devices):
-        event = 'Failed to update CPE devices in "cpe_app_config.py" file!'
-        logger.warning('{} - {}'.format(log_id, event))
-        print('  - WARNING: {} You can continue without saving the values entered.'.format(event))
-
-    return devices_info
-
-# --------------------------------------------------------------------------- #
 # FUNCTION: update_listen_port                                                #
 #                                                                             #
-# Update the value stored in the 'cpe_app_config.py' file if necessary that   #
+# Update the value stored in the 'ovoc_app_config.py' file if necessary that  #
 # defines the UDP port this script will listen on for forwarded SYSLOG format #
 # alarms and other OVOC server command responses when starting captures on    #
 # the appropriate OVOC servers.                                               #
@@ -1044,7 +481,7 @@ def get_cpe_devices(logger, log_id):
 #    status - Boolean: Success or failure of the update action.               #
 # --------------------------------------------------------------------------- #
 def update_listen_port(logger, log_id, listen_port):
-    """Update UDP port to listen on that is stored in 'cpe_app_config.py' file."""
+    """Update UDP port to listen on that is stored in 'ovoc_app_config.py' file."""
 
     status = False
     do_update = False
@@ -1052,28 +489,28 @@ def update_listen_port(logger, log_id, listen_port):
     # --------------------------------------------------------- #
     # Read in current configuration file contents. The contents #
     # will be modified by REGEX substitutions and written back  #
-    # the the 'cpe_app_config.py' file if differences exist.    #
+    # the the 'ovoc_app_config.py' file if differences exist.   #
     # --------------------------------------------------------- #
     config_file_contents = ''
-    event = 'Reading contents of "cpe_app_config.py" file.'
+    event = 'Reading contents of "ovoc_app_config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
     try:
-        with open('./cpe_app_config.py', 'r') as fp:
+        with open('./ovoc_app_config.py', 'r') as fp:
             config_file_contents = fp.read()
     except Exception as err:
-        event = 'Unable to read "cpe_app_config.py" file - Error: {}'.format(err)
+        event = 'Unable to read "ovoc_app_config.py" file - Error: {}'.format(err)
         logger.error('{} - {}'.format(log_id, event))
         print('  - ERROR: {}'.format(event))
 
     else:
-        event = 'Successfully read in "cpe_app_config.py" file.'
+        event = 'Successfully read in "ovoc_app_config.py" file.'
         logger.debug('{} - {}'.format(log_id, event))
 
         try:
             # ------------------------------- #
             # Check 'listen_port' for changes #
             # ------------------------------- #
-            if listen_port != "" and int(listen_port) != cpe_app_config.listen_port:
+            if listen_port != "" and int(listen_port) != ovoc_app_config.listen_port:
                 result = re.sub("(?s)listen_port = .*?$", "listen_port = " + str(listen_port), config_file_contents, 1, re.MULTILINE)
 
                 if result != config_file_contents:
@@ -1110,14 +547,14 @@ def update_listen_port(logger, log_id, listen_port):
             # ------------------------------- #
             if do_update:
                 try:
-                    with open('./cpe_app_config.py', 'w') as fp:
+                    with open('./ovoc_app_config.py', 'w') as fp:
                         fp.write(config_file_contents)
                     status = True
-                    event = 'Successfully updated "cpe_app_config.py" file'
+                    event = 'Successfully updated "ovoc_app_config.py" file'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  - INFO: {}'.format(event))
                 except Exception as err:
-                    event = 'Unable to write "cpe_app_config.py" file - Error: {}'.format(err)
+                    event = 'Unable to write "ovoc_app_config.py" file - Error: {}'.format(err)
                     logger.error('{} - {}'.format(log_id, event))
                     print('  - ERROR: {}'.format(event))
 
@@ -1141,7 +578,7 @@ def get_listen_port(logger, log_id):
 
     listen_port = 1025
 
-    stored_listen_port = cpe_app_config.listen_port
+    stored_listen_port = ovoc_app_config.listen_port
 
     event = 'Retrieved stored UDP listen port: [{}]'.format(stored_listen_port)
     logger.info('{} - {}'.format(log_id, event))
@@ -1159,7 +596,7 @@ def get_listen_port(logger, log_id):
     got_listen_port = False
     while not got_listen_port:
 
-        this_listen_port = input('Enter UPD port to listen on: (1025-65535) [{}] '.format(stored_listen_port))
+        this_listen_port = raw_input('Enter UPD port to listen on: (1025-65535) [{}] '.format(stored_listen_port))
         if this_listen_port == '':
             got_listen_port = True
             listen_port = stored_listen_port
@@ -1184,11 +621,11 @@ def get_listen_port(logger, log_id):
     logger.info('{} - {}'.format(log_id, event))
     print('  - INFO: {}'.format(event))
 
-    # -------------------------------------------------------------- #
-    # Check if updates are necessary to the 'cpe_app_config.py' file #
-    # -------------------------------------------------------------- #
+    # --------------------------------------------------------------- #
+    # Check if updates are necessary to the 'ovoc_app_config.py' file #
+    # --------------------------------------------------------------- #
     if not update_listen_port(logger, log_id, listen_port):
-        event = 'Failed to update "cpe_app_config.py" file!'
+        event = 'Failed to update "ovoc_app_config.py" file!'
         logger.warning('{} - {}'.format(log_id, event))
         print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
 
@@ -1197,7 +634,7 @@ def get_listen_port(logger, log_id):
 # --------------------------------------------------------------------------- #
 # FUNCTION: update_max_retries                                                #
 #                                                                             #
-# Update the value stored in the 'cpe_app_config.py' file if necessary that   #
+# Update the value stored in the 'ovoc_app_config.py' file if necessary that  #
 # defines the maximum number of REST API retry attempts are made before       #
 # failing the task.                                                           #
 #                                                                             #
@@ -1210,7 +647,7 @@ def get_listen_port(logger, log_id):
 #    status - Boolean: Success or failure of the update action.               #
 # --------------------------------------------------------------------------- #
 def update_max_retries(logger, log_id, max_retries):
-    """Update max REST API retry attempts value that is stored in 'cpe_app_config.py' file."""
+    """Update max REST API retry attempts value that is stored in 'ovoc_app_config.py' file."""
 
     status = False
     do_update = False
@@ -1218,28 +655,28 @@ def update_max_retries(logger, log_id, max_retries):
     # --------------------------------------------------------- #
     # Read in current configuration file contents. The contents #
     # will be modified by REGEX substitutions and written back  #
-    # the the 'cpe_app_config.py' file if differences exist.    #
+    # the the 'ovoc_app_config.py' file if differences exist.   #
     # --------------------------------------------------------- #
     config_file_contents = ''
-    event = 'Reading contents of "cpe_app_config.py" file.'
+    event = 'Reading contents of "ovoc_app_config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
     try:
-        with open('./cpe_app_config.py', 'r') as fp:
+        with open('./ovoc_app_config.py', 'r') as fp:
             config_file_contents = fp.read()
     except Exception as err:
-        event = 'Unable to read "cpe_app_config.py" file - Error: {}'.format(err)
+        event = 'Unable to read "ovoc_app_config.py" file - Error: {}'.format(err)
         logger.error('{} - {}'.format(log_id, event))
         print('  - ERROR: {}'.format(event))
 
     else:
-        event = 'Successfully read in "cpe_app_config.py" file.'
+        event = 'Successfully read in "ovoc_app_config.py" file.'
         logger.debug('{} - {}'.format(log_id, event))
 
         try:
             # ------------------------------- #
             # Check 'max_retries' for changes #
             # ------------------------------- #
-            if max_retries != "" and int(max_retries) != cpe_app_config.max_retries:
+            if max_retries != "" and int(max_retries) != ovoc_app_config.max_retries:
                 result = re.sub("(?s)max_retries = .*?$", "max_retries = " + str(max_retries), config_file_contents, 1, re.MULTILINE)
 
                 if result != config_file_contents:
@@ -1276,14 +713,14 @@ def update_max_retries(logger, log_id, max_retries):
             # ------------------------------- #
             if do_update:
                 try:
-                    with open('./cpe_app_config.py', 'w') as fp:
+                    with open('./ovoc_app_config.py', 'w') as fp:
                         fp.write(config_file_contents)
                     status = True
-                    event = 'Successfully updated "cpe_app_config.py" file'
+                    event = 'Successfully updated "ovoc_app_config.py" file'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  - INFO: {}'.format(event))
                 except Exception as err:
-                    event = 'Unable to write "cpe_app_config.py" file - Error: {}'.format(err)
+                    event = 'Unable to write "ovoc_app_config.py" file - Error: {}'.format(err)
                     logger.error('{} - {}'.format(log_id, event))
                     print('  - ERROR: {}'.format(event))
 
@@ -1307,7 +744,7 @@ def get_max_retries(logger, log_id):
 
     max_retries = 5
 
-    stored_max_retries = cpe_app_config.max_retries
+    stored_max_retries = ovoc_app_config.max_retries
 
     event = 'Retrieved stored max allowed REST API retry attempts value: [{}]'.format(stored_max_retries)
     logger.info('{} - {}'.format(log_id, event))
@@ -1325,7 +762,8 @@ def get_max_retries(logger, log_id):
     got_max_retries = False
     while not got_max_retries:
 
-        this_max_retries = input('Enter REST API retry attempts: (1-100) [{}] '.format(stored_max_retries))
+        this_max_retries = raw_input('Enter REST API retry attempts: (1-100) [{}] '.format(stored_max_retries))
+        print('Max = [{}]'.format(this_max_retries))
         if this_max_retries == '':
             got_max_retries = True
             max_retries = stored_max_retries
@@ -1350,192 +788,15 @@ def get_max_retries(logger, log_id):
     logger.info('{} - {}'.format(log_id, event))
     print('  - INFO: {}'.format(event))
 
-    # -------------------------------------------------------------- #
-    # Check if updates are necessary to the 'cpe_app_config.py' file #
-    # -------------------------------------------------------------- #
+    # --------------------------------------------------------------- #
+    # Check if updates are necessary to the 'ovoc_app_config.py' file #
+    # --------------------------------------------------------------- #
     if not update_max_retries(logger, log_id, max_retries):
-        event = 'Failed to update "cpe_app_config.py" file!'
+        event = 'Failed to update "ovoc_app_config.py" file!'
         logger.warning('{} - {}'.format(log_id, event))
         print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
 
     return max_retries
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: update_max_events_per_device                                      #
-#                                                                             #
-# Update the value stored in the 'cpe_app_config.py' file if necessary that   #
-# defines the maximum number of OVOC alarm trigger events that can be         #
-# received for a CPE device and have its network traffic capture restarted.   #
-# After the max number of events is reached, the traffic capture on that      #
-# device is not restarted.                                                    #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger       - File handler for storing logged actions                  #
-#     log_id       - Unique identifier for this devices log entries           #
-#     max_events_per_device - Maximum number of events for each device        #
-#                                                                             #
-# Return:                                                                     #
-#    status - Boolean: Success or failure of the update action.               #
-# --------------------------------------------------------------------------- #
-def update_max_events_per_device(logger, log_id, max_events_per_device):
-    """Update max OVOC trigger events per device value that is stored in the 'cpe_app_config.py' file."""
-
-    status = False
-    do_update = False
-
-    # --------------------------------------------------------- #
-    # Read in current configuration file contents. The contents #
-    # will be modified by REGEX substitutions and written back  #
-    # the the 'cpe_app_config.py' file if differences exist.    #
-    # --------------------------------------------------------- #
-    config_file_contents = ''
-    event = 'Reading contents of "cpe_app_config.py" file.'
-    logger.debug('{} - {}'.format(log_id, event))
-    try:
-        with open('./cpe_app_config.py', 'r') as fp:
-            config_file_contents = fp.read()
-    except Exception as err:
-        event = 'Unable to read "cpe_app_config.py" file - Error: {}'.format(err)
-        logger.error('{} - {}'.format(log_id, event))
-        print('  - ERROR: {}'.format(event))
-
-    else:
-        event = 'Successfully read in "cpe_app_config.py" file.'
-        logger.debug('{} - {}'.format(log_id, event))
-
-        try:
-            # ----------------------------------------- #
-            # Check 'max_events_per_device' for changes #
-            # ----------------------------------------- #
-            if max_events_per_device != "" and int(max_events_per_device) != cpe_app_config.max_events_per_device:
-                result = re.sub("(?s)max_events_per_device = .*?$", "max_events_per_device = " + str(max_events_per_device), config_file_contents, 1, re.MULTILINE)
-
-                if result != config_file_contents:
-                    # ------------------------------------------------- #
-                    # Configuration file contents successfully modified #
-                    # ------------------------------------------------- #
-                    config_file_contents = result
-                    do_update = True
-                    event = 'Max allowed events per device update successfully prepared.'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
-                else:
-                    # -------------------------------------------- #
-                    # Failed to modify configuration file contents #
-                    # -------------------------------------------- #
-                    event = 'Failed to prepare update for max allowed events per device!'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-
-            else:
-                # -------------------- #
-                # No updates necessary #
-                # -------------------- #
-                status = True
-
-        except Exception as err:
-            event = 'Processing Error: {}'.format(err)
-            logger.error('{} - {}'.format(log_id, event))
-            print('  - ERROR: {}'.format(event))
-
-        else:
-            # ------------------------------- #
-            # Save configuration file updates #
-            # ------------------------------- #
-            if do_update:
-                try:
-                    with open('./cpe_app_config.py', 'w') as fp:
-                        fp.write(config_file_contents)
-                    status = True
-                    event = 'Successfully updated "cpe_app_config.py" file'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
-                except Exception as err:
-                    event = 'Unable to write "cpe_app_config.py" file - Error: {}'.format(err)
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
-
-    return status
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: get_max_events_per_device                                         #
-#                                                                             #
-# Get value for maximum number of OVOC alarm events that can be received that #
-# trigger the retrieval of the network capture from a CPE device. If the      #
-# events received counter is less than this value, then the network traffic   #
-# capture is restarted on the CPE device.                                     #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger - File handler for storing logged actions                        #
-#     log_id - Unique identifier for this devices log entries                 #
-#                                                                             #
-# Return:                                                                     #
-#    max_events_per_device - Integer value in the range (1 - 50)              #
-# --------------------------------------------------------------------------- #
-def get_max_events_per_device(logger, log_id):
-    """Get value for max allowed events per device that trigger a pull of the network capture from a CPE device."""
-
-    max_retries = 5
-
-    stored_max_events_per_device = cpe_app_config.max_events_per_device
-
-    event = 'Retrieved stored max allowed OVOC alarm trigger events per device value: [{}]'.format(stored_max_events_per_device)
-    logger.info('{} - {}'.format(log_id, event))
-
-    # ---------------------------------------------------- #
-    # Allow modification of stored REST API retry attempts #
-    # ---------------------------------------------------- #
-    print('')
-    print(':============================================================:')
-    print(': Maximum number of OVOC alarm events that can be received   :')
-    print(': per device that trigger the retrieval of the network       :')
-    print(': capture from a CPE device.                                 :')
-    print(':                                                            :')
-    print(': If the triggering events counter is less than the value,   :')
-    print(': then the network traffic capture is restarted on the CPE   :')
-    print(': device.                                                    :')
-    print(':                                                            :')
-    print(': NOTE: Currently triggering on "Connection Lost" alarm.     :')
-    print(':                                                            :')
-    print(': NOTE: Entered value should be in the range (1 - 50)        :')
-    print(':============================================================:')
-    got_max_events_per_device = False
-    while not got_max_events_per_device:
-
-        this_max_events_per_device = input('Enter OVOC alarm trigger events per device: (1-50) [{}] '.format(stored_max_events_per_device))
-        if this_max_events_per_device == '':
-            got_max_events_per_device = True
-            max_events_per_device = stored_max_events_per_device
-        else:
-            try:
-                this_max_events_per_device = int(this_max_events_per_device)
-                if this_max_events_per_device >= 1 and this_max_events_per_device <= 50:
-                    got_max_events_per_device = True
-                    max_events_per_device = this_max_events_per_device
-                else:
-                    event = 'Invalid setting: [{}]. Must be a value in the range (1-50).'.format(this_max_events_per_device)
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {} Try again.\n'.format(event))
-                    got_max_events_per_device = False
-            except ValueError:
-                event = 'Invalid number: [{}]. Must be a value in the range (1-50).'.format(this_max_events_per_device)
-                logger.error('{} - {}'.format(log_id, event))
-                print('  - ERROR: {} Try again.\n'.format(event))
-                got_max_events_per_device = False
-
-    event = 'Set OVOC alarm trigger events per device to: [{}]'.format(max_events_per_device)
-    logger.info('{} - {}'.format(log_id, event))
-    print('  - INFO: {}'.format(event))
-
-    # -------------------------------------------------------------- #
-    # Check if updates are necessary to the 'cpe_app_config.py' file #
-    # -------------------------------------------------------------- #
-    if not update_max_events_per_device(logger, log_id, max_events_per_device):
-        event = 'Failed to update "cpe_app_config.py" file!'
-        logger.warning('{} - {}'.format(log_id, event))
-        print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
-
-    return max_events_per_device
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: start_capture                                                     #
@@ -1584,7 +845,7 @@ def start_capture(logger, log_id, target_device, devices_info):
             # ---------------------------------- #
             submitted = False
             attempt = 1
-            while attempt <= cpe_app_config.max_retries and not submitted:
+            while attempt <= ovoc_app_config.max_retries and not submitted:
 
                 # ---------------------------------------- #
                 # Attempt to start debug capture on device #
@@ -1628,7 +889,7 @@ debug capture data physical start
             started = False
             if submitted:
                 attempt = 1
-                while attempt <= cpe_app_config.max_retries and not started:
+                while attempt <= ovoc_app_config.max_retries and not started:
                     # --------------------------------- #
                     # Attempt to verify capture started #
                     # --------------------------------- #
@@ -1753,7 +1014,7 @@ def stop_capture(logger, log_id, target_device, devices_info):
             # --------------------------------- #
             submitted = False
             attempt = 1
-            while attempt <= cpe_app_config.max_retries and not submitted:
+            while attempt <= ovoc_app_config.max_retries and not submitted:
 
                 # --------------------------------------- #
                 # Attempt to stop debug capture on device #
@@ -1795,7 +1056,7 @@ debug capture data physical stop
             stopped = False
             if submitted:
                 attempt = 1
-                while attempt <= cpe_app_config.max_retries and not stopped:
+                while attempt <= ovoc_app_config.max_retries and not stopped:
                     # --------------------------------- #
                     # Attempt to verify capture stopped #
                     # --------------------------------- #
@@ -1920,7 +1181,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                 # Retrieve debug capture file stored on this device #
                 # ------------------------------------------------- #
                 attempt = 1
-                while attempt <= cpe_app_config.max_retries and not retrieved:
+                while attempt <= ovoc_app_config.max_retries and not retrieved:
 
                     # -------------------------------------------------- #
                     # Attempt to retrieve debug capture file from device #
@@ -2069,28 +1330,28 @@ def parse_message(logger, log_id, message):
             msg_info['deviceSerial'] = match.group(11).strip()
             msg_info['deviceDescription'] = match.group(12).strip()
 
-    elif re.search('^TRYING', message):
-        msg_info['type'] = 'response'
+    elif re.search('^CAPTURE', message):
+        msg_info['type'] = 'request'
 
-        event = 'Matched OVOC capture script response'
+        event = 'Matched CPE capture script request'
         logger.debug('{} - {}'.format(log_id, event))
 
-        match = re.search('(TRYING)\s+(.*$)', message)
+        match = re.search('(CAPTURE)\s+(.*$)', message)
 
         if match:
-            msg_info['response'] = match.group(1).strip()
+            msg_info['request'] = match.group(1).strip()
             msg_info['device'] = match.group(2).strip()
 
-    elif re.search('^OK', message):
-        msg_info['type'] = 'response'
+    elif re.search('^STOP', message):
+        msg_info['type'] = 'request'
 
-        event = 'Matched OVOC capture script response'
+        event = 'Matched CPE capture script request'
         logger.debug('{} - {}'.format(log_id, event))
 
-        match = re.search('(OK)\s+(.*$)', message)
+        match = re.search('(STOP)\s+(.*$)', message)
 
         if match:
-            msg_info['response'] = match.group(1).strip()
+            msg_info['request'] = match.group(1).strip()
             msg_info['device'] = match.group(2).strip()
 
     event = 'Parsed message elements:\n{}'.format(json.dumps(msg_info, indent=4))
@@ -2309,31 +1570,58 @@ def main(argv):
     # ------------------ #
     version = '1.0'
 
-    # ----------------------------- #
-    # Prepare captures subdirectory #
-    # ----------------------------- #
-    pathlib.Path('./captures').mkdir(parents=True, exist_ok=True)
-
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
     # ------------------------------------------- #
-    if rotate_logs(logger, log_id, cpe_app_config.app_log_file, cpe_app_config.app_max_log_file_size, cpe_app_config.app_archived_files):
+    if rotate_logs(logger, log_id, ovoc_app_config.app_log_file, ovoc_app_config.app_max_log_file_size, ovoc_app_config.app_archived_files):
         event = 'Rotation of log files completed'
         logger.info('{} - {}'.format(log_id, event))
+
+    # ----------------------------- #
+    # Prepare captures subdirectory #
+    # ----------------------------- #
+    #pathlib.Path('./captures').mkdir(parents=True, exist_ok=True)
+    try:
+        if not os.path.isdir('./captures'):
+            os.makedirs('./captures')
+            print('Capture directory [./captures] created successfully.')
+    except OSError as error:
+        print('Capture directory [./captures] can not be created!')
+        exit(1)
+
+    # ------------------------------------------------------------------- #
+    # When the CPE capture app script sucessfully started a traffic       #
+    # capture for a CPE device, it then sends a command request 'CAPTURE' #
+    # to this script to start a capture on an OVOC server at the same     #
+    # time. A dictionary record is also created to track information on   #
+    # the CPE that is being monitored. The following dictionary elements  #
+    # are used to track the activity of the CPE devices:                  #
+    # {                                                                   #
+    #     "devices": [                                                    #
+    #         {                                                           #
+    #             "device": "<device address>",                           #
+    #             "state": "not active",                                  #
+    #             "tasks": []                                             #
+    #         },                                                          #
+    #         ...                                                         #
+    #         <Next Device>                                               #
+    #     ]                                                               #
+    # }                                                                   #
+    # ------------------------------------------------------------------- #
+    devices_info = {}
+    devices_info['devices'] = []
 
     # ------------------------------------ #
     # Get parameters via interactive input #
     # ------------------------------------ #
     try:
-        devices_info = get_cpe_devices(logger, log_id)
         # -------------------------------------------------------- #
         # Disabled interactively setting 'listen_port'.            #
         # To enable, switch the comments on the following 2 lines. #
         # -------------------------------------------------------- #
         #listen_port = get_listen_port(logger, log_id)
-        listen_port = cpe_app_config.listen_port
+        listen_port = ovoc_app_config.listen_port
         max_retries = get_max_retries(logger, log_id)
-        max_events_per_device = get_max_events_per_device(logger, log_id)
 
     except KeyboardInterrupt:
         print('')
@@ -2343,20 +1631,21 @@ def main(argv):
         exit(1)
 
     begin_time = time.time()
-    begin_timestamp = datetime.now()
+    #begin_timestamp = datetime.now()
+    begin_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
     print('===============================================================================')
-    print('                         CPE NETWORK TRAFFIC CAPTURES')
+    print('                         OVOC NETWORK TRAFFIC CAPTURES')
     print('===============================================================================')
-    print('Start Time :', begin_timestamp)
+    print('Start Time : {}'.format(begin_timestamp))
     print('-------------------------------------------------------------------------------')
 
-    # --------------------------------------------- #
-    # Prepare UDP socket to listen for OVOC alarms  #
-    # and to send and receive command requests and  #
-    # responses to complimentary OVOC capture app   #
-    # scripts that manage the CPE's being captured. #
-    # --------------------------------------------- #
+    # ------------------------------------------------- #
+    # Prepare UDP socket to receive command requests    #
+    # and send command responses to complimentary       #
+    # CPE capture app scripts that control the triggers #
+    # for preforming network traffic captures.          #
+    # ------------------------------------------------- #
     buffer_size = 1024
 
     # -------------------------------------- #
@@ -2373,222 +1662,111 @@ def main(argv):
 
     else:
 
-        # ----------------------------------------- #
-        # Start captures on all defined CPE devices #
-        # ----------------------------------------- #
-        index = 0
-        while index < len(devices_info['devices']):
+        event = 'Listening for command messages on UDP port: [{}]'.format(listen_port)
+        logger.info('{} - {}'.format(log_id, event))
+        print('{}'.format(event))
 
-            this_device_address = ''
-            this_device_username = ''
-            this_device_password = ''
+        active_devices = 0
 
-            for key in devices_info['devices'][index]:
-                if key == 'device':
-                    this_device_address = devices_info['devices'][index][key]
-                if key == 'username':
-                    this_device_username = devices_info['devices'][index][key]
-                if key == 'password':
-                    this_device_password = devices_info['devices'][index][key]
-                if key == 'ovoc':
-                    this_ovoc_address = devices_info['devices'][index][key]
+        while (len(devices_info['devices']) == 0 or active_devices > 0):
 
-            if this_device_address != '' and \
-               this_device_username != '' and \
-               this_device_password != '' and \
-               this_ovoc_address != '':
+            bytes_address_pair = udp_server_socket.recvfrom(buffer_size)
+            message = bytes_address_pair[0]
+            address = bytes_address_pair[1]
 
-                # -------------------------------- #
-                # Start capture on this CPE device #
-                # -------------------------------- #
-                devices_info = start_capture(logger, log_id, this_device_address, devices_info)
+            event = 'UDP message from: [{}]'.format(address)
+            logger.info('{} - {}'.format(log_id, event))
 
-                # ------------------------------------------------------- #
-                # Send CAPTURE command to OVOC capture app script to      #
-                # trigger it to start a 'tcpdump' capture on this device. #
-                # ------------------------------------------------------- #
-                this_request = 'CAPTURE {}'.format(this_device_address)
-                event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
+            # ---------------------- #
+            # Parse received message #
+            # ---------------------- #
+            msg_info = parse_message(logger, log_id, message.decode('utf-8'))
+
+            # ----------------------------------------------- #
+            # Process CPE capture app script command requests #
+            # ----------------------------------------------- #
+            if msg_info['type'] == 'request':
+
+                target_device = msg_info['device']
+                event = 'Received request [{}] from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
-                if send_cmd_request(logger, log_id, udp_server_socket, this_request, this_ovoc_address):
-                    event = 'Successfully sent request to start capture on OVOC server.'
+
+                # ---------------------------------------------- #
+                # Search for device in 'devices_info' dictionary #
+                # ---------------------------------------------- #
+                device_found = False
+                device_index = -1
+                index = 0
+                for device in devices_info['devices']:
+                    if device['device'] == target_device:
+                        device_found = True
+                        device_index = index
+
+                        event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+                        logger.debug('{} - {}'.format(log_id, event))
+
+                    index += 1
+
+                # ----------------------------------- #
+                # If not found, add new device record #
+                # ----------------------------------- #
+                if not device_found:
+
+                    # ------------------------ #
+                    # Create CPE device record #
+                    # ------------------------ #
+                    devices_info['devices'].append({})
+                    device_index = len(devices_info['devices']) - 1
+                    devices_info['devices'][device_index]['device'] = target_device
+                    devices_info['devices'][device_index]['tasks'] = []
+
+                    # ----------------------------------------------------- #
+                    # Default the state to 'not active' to indicate the     #
+                    # device is currently not performing a network capture. #
+                    # ---------------------------------------------------- #
+                    devices_info['devices'][device_index]['state'] = 'not active'
+
+                    event = 'Created new CPE record for device: [{}]'.format(target_device)
                     logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
-                else:
-                    event = 'Failed to send request to start capture on OVOC server!'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('    - ERROR: {}'.format(event))
 
-            index += 1
+                    event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
+                    logger.debug('{} - {}'.format(log_id, event))
 
-        # ------------------------------------------------ #
-        # For debugging - Output 'devices_info' dictionary #
-        # ------------------------------------------------ #
-        event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
-        logger.debug('{} - {}'.format(log_id, event))
+                # ----------------------------------------------------- #
+                # If an 'CAPTURE' request has been received, then start #
+                # 'tcpdump' filtering for this specific device.         #
+                # ----------------------------------------------------- #
+                if msg_info['request'] == 'CAPTURE':
+                    #device['ovocState'] = 'active'
+                    pass
 
-        # -------------------------------------------------- #
-        # Start listening for OVOC alarms if any CPE devices #
-        # have their debug capture in an 'active' state.     #
-        # -------------------------------------------------- #
-        active_devices = 0
-        for device in devices_info['devices']:
-            if device['state'].lower() == 'active':
-                active_devices += 1
+            else:
+                event = 'Received unknown message to process! Check logs for details.'
+                logger.warning('{} - {}'.format(log_id, event))
+                print('  + WARNING: {}'.format(event))
 
-        if active_devices > 0:
+            # -------------------------------------------- #
+            # Check for any CPE devices actively capturing #
+            # -------------------------------------------- #
+            active_devices = 0
+            for device in devices_info['devices']:
+                if device['state'].lower() == 'active':
+                    active_devices += 1
 
-            event = 'Listening for OVOC alarms and command messages on UDP port: [{}]'.format(listen_port)
+            # ------------------------------------------------ #
+            # For debugging - Output 'devices_info' dictionary #
+            # ------------------------------------------------ #
+            event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
+            logger.debug('{} - {}'.format(log_id, event))
+
+            event = 'Listening for command messages on UDP port: [{}]'.format(listen_port)
             logger.info('{} - {}'.format(log_id, event))
             print('{}'.format(event))
 
-            while (active_devices > 0):
-
-                bytes_address_pair = udp_server_socket.recvfrom(buffer_size)
-                message = bytes_address_pair[0]
-                address = bytes_address_pair[1]
-
-                event = 'UDP message from: [{}]'.format(address)
-                logger.info('{} - {}'.format(log_id, event))
-
-                # ---------------------- #
-                # Parse received message #
-                # ---------------------- #
-                msg_info = parse_message(logger, log_id, message.decode('utf-8'))
-
-                # ------------------- #
-                # Process OVOC alarms #
-                # ------------------- #
-                if msg_info['type'] == 'alarm':
-
-                    # ------------------------------------------- #
-                    # Trigger retrieval of CPE network capture on #
-                    # 'Connection Lost' OVOC alarm.               #
-                    # ------------------------------------------- #
-                    if msg_info['alarmType'].lower() == 'connection alarm' and \
-                       msg_info['alarm'].lower() == 'connection lost':
-
-                        device_with_alarm = msg_info['ipAddress']
-
-                        event = 'Received [{}] alarm from OVOC associated with device: [{}]'.format(msg_info['alarm'], device_with_alarm)
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('  + {}'.format(event))
-
-                        device_events = 0
-                        device_index = 0
-                        for this_device in devices_info['devices']:
-                            if this_device['device'] == device_with_alarm:
-                                devices_info['devices'][device_index]['events'] += 1
-                                event = 'Incrementing events counter to: [{}]'.format(devices_info['devices'][device_index]['events'])
-                                logger.info('{} - {}'.format(log_id, event))
-                                device_events = devices_info['devices'][device_index]['events']
-
-                        # -------------------------- #
-                        # Stop capture on CPE device #
-                        # -------------------------- #
-                        devices_info = stop_capture(logger, log_id, device_with_alarm, devices_info)
-
-                        # ------------------------------------- #
-                        # Retrieve capture file from CPE device #
-                        # ------------------------------------- #
-                        devices_info = retrieve_capture(logger, log_id, device_with_alarm, devices_info)
-
-                        # ------------------------------------------------------ #
-                        # Send STOP command to OVOC capture app script to        #
-                        # trigger it to stop a 'tcpdump' capture on this device. #
-                        # ------------------------------------------------------ #
-                        this_request = 'STOP {}'.format(this_device_address)
-                        event = 'Sending message to stop capture on OVOC server: [{}]'.format(this_request)
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('  + {}'.format(event))
-                        if send_cmd_request(logger, log_id, udp_server_socket, this_request, this_ovoc_address):
-                            event = 'Successfully sent request to stop capture on OVOC server.'
-                            logger.info('{} - {}'.format(log_id, event))
-                            print('    - INFO: {}'.format(event))
-                        else:
-                            event = 'Failed to send request to stop capture on OVOC server!'
-                            logger.error('{} - {}'.format(log_id, event))
-                            print('    - ERROR: {}'.format(event))
-
-                        # ---------------------------------------------------------- #
-                        # If device events is less than or equal to the              #
-                        # 'max_events_per_device' defined in the 'cpe_app_config.py' #
-                        # file, start another capture for this device.               #
-                        # ---------------------------------------------------------- #
-                        if device_events < cpe_app_config.max_events_per_device:
-
-                            # -------------------------------- #
-                            # Start capture on this CPE device #
-                            # -------------------------------- #
-                            devices_info = start_capture(logger, log_id, this_device_address, devices_info)
-
-                    else:
-
-                        # ------------------------------------------------- #
-                        # Just log any other OVOC alarms that don't trigger #
-                        # the stop and retrieval of network captures.       #
-                        # ------------------------------------------------- #
-                        device_with_alarm = msg_info['ipAddress']
-                        event = 'Received [{}] alarm from OVOC associated with device: [{}]'.format(msg_info['alarm'], device_with_alarm)
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('  + {}'.format(event))
-
-                # ------------------------------------------------- #
-                # Process OVOC capture app script command responses #
-                # ------------------------------------------------- #
-                elif msg_info['type'] == 'response':
-
-                    # ------------------------------------------------------------- #
-                    # Update the state accordingly in the 'devices_info' dictionary #
-                    # ------------------------------------------------------------- #
-                    target_device = msg_info['device']
-                    for device in devices_info['devices']:
-                        if device['device'] == target_device:
-
-                            event = 'Received response [{}] from OVOC associated with device: [{}]'.format(msg_info['response'], target_device)
-                            logger.info('{} - {}'.format(log_id, event))
-                            print('  + {}'.format(event))
-
-                            # -------------------------------------------------- #
-                            # If an 'OK' response has been received, then OVOC   #
-                            # successfully started the 'tcpdump' for the device. #
-                            # -------------------------------------------------- #
-                            if msg_info['response'] == 'OK':
-                                device['ovocState'] = 'active'
-
-                else:
-                    event = 'Received unknown message to process! Check logs for details.'
-                    logger.warning('{} - {}'.format(log_id, event))
-                    print('  + WARNING: {}'.format(event))
-
-                # -------------------------------------------- #
-                # Check for any CPE devices actively capturing #
-                # -------------------------------------------- #
-                active_devices = 0
-                for device in devices_info['devices']:
-                    if device['state'].lower() == 'active':
-                        active_devices += 1
-
-                # ------------------------------------------------ #
-                # For debugging - Output 'devices_info' dictionary #
-                # ------------------------------------------------ #
-                event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
-                logger.debug('{} - {}'.format(log_id, event))
-
-                event = 'Listening for OVOC alarms and command messages on UDP port: [{}]'.format(listen_port)
-                logger.info('{} - {}'.format(log_id, event))
-                print('{}'.format(event))
-
-            event = 'All devices have completed'
-            logger.info('{} - {}'.format(log_id, event))
-            print('  - INFO: {}'.format(event))
-
-        else:
-
-            event = 'No CPE devices are actively performing network captures.'
-            logger.info('{} - {}'.format(log_id, event))
-            print('  - INFO: {}'.format(event))
+        event = 'All devices have completed'
+        logger.info('{} - {}'.format(log_id, event))
+        print('  - INFO: {}'.format(event))
 
     event = 'Finished'
     logger.info('{} - {}'.format(log_id, event))
@@ -2600,12 +1778,13 @@ def main(argv):
     #csv_records = create_csv_file(logger, log_id, output_csv, begin_timestamp, devices_info)
 
     end_time = time.time()
-    end_timestamp = datetime.now()
+    #end_timestamp = datetime.now()
+    end_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
     print('===============================================================================')
     print('                              PROCESSING SUMMARY')
     print('===============================================================================')
-    print('Completed:', end_timestamp)
+    print('Completed: '.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
 
