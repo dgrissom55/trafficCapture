@@ -42,14 +42,15 @@ on the CPE device and it loses management connectivity with the OVOC server.
 The traffic captures on the OVOC servers running this script are started
 and stopped using UDP signalled commands from the 'cpe_capture_app.py'
 script. Commands are sent to this script to the 'listen_port' defined for in
-this scripts 'ovoc_config.py' file.
+this scripts 'config.py' file.
 
 On the OVOC servers, the network captures are performed by issuing system
 calls to the 'tcpdump' app. To start a capture on an OVOC server, this script
 receives a 'CAPTURE' command sent from the CPE controller app to inform this
 OVOC server of which CPE traffic should be filtered and captured using
 'tcpdump'. This OVOC capture app script responds with a 'TRYING' when setting
-up the tcpdump, and an 'OK' when the tcpdump process is running. The captures
+up the tcpdump, and an 'OK' when the tcpdump process is running. The response
+will be 'FAIL' if the capture fails to be started. The captures
 are stopped on this OVOC server after the CPE controller app script
 'cpe_capture_app.py' receives the 'Connection Lost' SNMP alarm. That CPE app
 script will send a 'STOP' command to the appropriate OVOC server app that 
@@ -59,13 +60,17 @@ The following messages are exchanged:
 
   CPE script                                 This script
        |                                           |
-       |----- CAPTURE <address of CPE device> ---->|
+       |-------- CAPTURE <device address> -------->|
        |                                           |
-       |<----  TRYING <address of CPE device> -----|
+       |<-------- TRYING <device address> ---------|
        |                                           |
-       |<----    OK <address of CPE device>   -----|
+       |<------- OK | FAIL <device address> -------|
        |                                           |
-       |-----   STOP <address of CPE device>  ---->|
+       |---- STOP <device address> <filename> ---->|
+       |                                           |
+       |<-------- TRYING <device address> ---------|
+       |                                           |
+       |<------- OK | FAIL <device address> -------|
        |                                           |
 
 This script tracks capture states, all tasks, and other information for each
@@ -76,22 +81,17 @@ devices information. The following is an example of what is tracked:
      "devices": [
          {
              "device": "<device ip address>",
-             "username": "<device REST API username>",
-             "password": "<device REST API password>",
              "status": "Success|Failure",
              "state": "active|not active",
-             "events": "Success|Failure",
-             "ovocState": "active|not active",
              "description": "<some description>",
+             "lastCapture": "<last stopped capture filename>",
              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
              "tasks": [
                  {
                      "task": "<task name>",
                      "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
                      "status": "Success|Failure",
-                     "statusCode": <http response status code>,
-                     "output": "<CLI script execution>",
-                     "description": "<CLI script load status>",
+                     "description": "<status information>",
                  },
                  ...
                  <Next Task>
@@ -103,7 +103,7 @@ devices information. The following is an example of what is tracked:
  }
  
  For a 'Stop capture' task, the following item is added to the task items:
-                     "fileaname": "<capture filename>",
+                     "filename": "<capture filename>",
 
 -------------------------------------------------------------------------------
 """
@@ -125,8 +125,8 @@ import shutil
 from datetime import datetime
 from getpass import getpass
 
-# Import ovoc_app_config.py
-import ovoc_app_config
+# Import config.py
+import config
 
 # ------------------------------ #
 # Check for root user privileges #
@@ -139,16 +139,16 @@ if os.geteuid() != 0:
 # ---------------------------- #
 # Log File Format and Settings #
 # ---------------------------- #
-#pathlib.Path(ovoc_app_config.storage_dir).mkdir(parents=True, exist_ok=True)
+#pathlib.Path(config.storage_dir).mkdir(parents=True, exist_ok=True)
 try:
-    if not os.path.isdir(ovoc_app_config.storage_dir):
-        os.makedirs(ovoc_app_config.storage_dir)
-        print('Log directory [{}] created successfully.'.format(ovoc_app_config.storage_dir))
+    if not os.path.isdir(config.storage_dir):
+        os.makedirs(config.storage_dir)
+        print('Log directory [{}] created successfully.'.format(config.storage_dir))
 except OSError as error:
-    print('Log directory [{}] can not be created!'.format(ovoc_app_config.storage_dir))
+    print('Log directory [{}] can not be created!'.format(config.storage_dir))
     exit(1)
-app_log_level = ovoc_app_config.app_log_level
-app_log_file = ovoc_app_config.storage_dir + '/' + ovoc_app_config.app_log_file
+app_log_level = config.app_log_level
+app_log_file = config.storage_dir + '/' + config.app_log_file
 app_log_handler = logging.FileHandler(app_log_file)
 app_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-8s] %(message)s", datefmt='%d-%b-%Y %H:%M:%S'))
 logger = logging.getLogger('trafficCapture')
@@ -166,12 +166,12 @@ log_id = '[SID=' + str(os.getpid()) + ']'
 # Check to see if the logs files need to be rotated due to the 'current' log  #
 # log size being >= '???_max_log_file_size' parameter. The total number of    #
 # archived log files is set by the parameter '???_archived_files'. These      #
-# parameters are defined in the 'ovoc_app_config.py' file and passed to the   #
-# function as argument parameters.                                            #
+# parameters are defined in the 'config.py' file and passed to the function   #
+# as argument parameters.                                                     #
 #                                                                             #
 # The 'current' log file path and basename are also defined in the            #
-# 'ovoc_app_config.py' configuration file. The log file is passed into this   #
-# function as a parameter as well.                                            #
+# 'config.py' configuration file. The log file is passed into this function   #
+# as a parameter as well.                                                     #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger         - File handler for storing logged actions                #
@@ -191,7 +191,7 @@ def rotate_logs(logger, log_id, log_file, max_size, archived_files):
     # ------------------------------------------- #
     # Append storage directory to 'log_file' name #
     # ------------------------------------------- #
-    log_file = ovoc_app_config.storage_dir + '/' + log_file
+    log_file = config.storage_dir + '/' + log_file
 
     # --------------------------- #
     # Check current log file size #
@@ -455,7 +455,7 @@ def send_cmd_response(logger, log_id, udp_socket, response, address):
     # -------------------------------------------------- #
     try:
         this_response = response.encode()
-        udp_socket.sendto(this_response, (address, ovoc_app_config.cpe_listen_port))
+        udp_socket.sendto(this_response, address)
         status = True
     except Exception as err:
         event = '{}'.format(err)
@@ -467,10 +467,8 @@ def send_cmd_response(logger, log_id, udp_socket, response, address):
 # --------------------------------------------------------------------------- #
 # FUNCTION: update_listen_port                                                #
 #                                                                             #
-# Update the value stored in the 'ovoc_app_config.py' file if necessary that  #
-# defines the UDP port this script will listen on for forwarded SYSLOG format #
-# alarms and other OVOC server command responses when starting captures on    #
-# the appropriate OVOC servers.                                               #
+# Update the value stored in the 'config.py' file if necessary that defines   #
+# the UDP port this script will listen on CPE capture app command requests.   #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger       - File handler for storing logged actions                  #
@@ -481,7 +479,7 @@ def send_cmd_response(logger, log_id, udp_socket, response, address):
 #    status - Boolean: Success or failure of the update action.               #
 # --------------------------------------------------------------------------- #
 def update_listen_port(logger, log_id, listen_port):
-    """Update UDP port to listen on that is stored in 'ovoc_app_config.py' file."""
+    """Update UDP port to listen on that is stored in 'config.py' file."""
 
     status = False
     do_update = False
@@ -489,28 +487,28 @@ def update_listen_port(logger, log_id, listen_port):
     # --------------------------------------------------------- #
     # Read in current configuration file contents. The contents #
     # will be modified by REGEX substitutions and written back  #
-    # the the 'ovoc_app_config.py' file if differences exist.   #
+    # the the 'config.py' file if differences exist.            #
     # --------------------------------------------------------- #
     config_file_contents = ''
-    event = 'Reading contents of "ovoc_app_config.py" file.'
+    event = 'Reading contents of "config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
     try:
-        with open('./ovoc_app_config.py', 'r') as fp:
+        with open('./config.py', 'r') as fp:
             config_file_contents = fp.read()
     except Exception as err:
-        event = 'Unable to read "ovoc_app_config.py" file - Error: {}'.format(err)
+        event = 'Unable to read "config.py" file - Error: {}'.format(err)
         logger.error('{} - {}'.format(log_id, event))
         print('  - ERROR: {}'.format(event))
 
     else:
-        event = 'Successfully read in "ovoc_app_config.py" file.'
+        event = 'Successfully read in "config.py" file.'
         logger.debug('{} - {}'.format(log_id, event))
 
         try:
             # ------------------------------- #
             # Check 'listen_port' for changes #
             # ------------------------------- #
-            if listen_port != "" and int(listen_port) != ovoc_app_config.listen_port:
+            if listen_port != "" and int(listen_port) != config.listen_port:
                 result = re.sub("(?s)listen_port = .*?$", "listen_port = " + str(listen_port), config_file_contents, 1, re.MULTILINE)
 
                 if result != config_file_contents:
@@ -547,38 +545,37 @@ def update_listen_port(logger, log_id, listen_port):
             # ------------------------------- #
             if do_update:
                 try:
-                    with open('./ovoc_app_config.py', 'w') as fp:
+                    with open('./config.py', 'w') as fp:
                         fp.write(config_file_contents)
                     status = True
-                    event = 'Successfully updated "ovoc_app_config.py" file'
+                    event = 'Successfully updated "config.py" file'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  - INFO: {}'.format(event))
                 except Exception as err:
-                    event = 'Unable to write "ovoc_app_config.py" file - Error: {}'.format(err)
+                    event = 'Unable to write "config.py" file - Error: {}'.format(err)
                     logger.error('{} - {}'.format(log_id, event))
                     print('  - ERROR: {}'.format(event))
 
     return status
 
-# --------------------------------------------------------------------------- #
-# FUNCTION: get_listen_port                                                   #
-#                                                                             #
-# Get UDP port to listen on when waiting for forwarded alarms from an OVOC    #
-# server.                                                                     #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger - File handler for storing logged actions                        #
-#     log_id - Unique identifier for this devices log entries                 #
-#                                                                             #
-# Return:                                                                     #
-#    listen_port - Integer value in the range (1025 - 65535)                  #
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
+# FUNCTION: get_listen_port                                                    #
+#                                                                              #
+# Get UDP port to listen on when waiting for CPE capture app command requests. #
+#                                                                              #
+# Parameters:                                                                  #
+#     logger - File handler for storing logged actions                         #
+#     log_id - Unique identifier for this devices log entries                  #
+#                                                                              #
+# Return:                                                                      #
+#    listen_port - Integer value in the range (1025 - 65535)                   #
+# ---------------------------------------------------------------------------- #
 def get_listen_port(logger, log_id):
-    """Get UPD port number to listen on for forwarded alarms from and OVOC server."""
+    """Get UPD port number to listen on for CPE capture app command requests."""
 
     listen_port = 1025
 
-    stored_listen_port = ovoc_app_config.listen_port
+    stored_listen_port = config.listen_port
 
     event = 'Retrieved stored UDP listen port: [{}]'.format(stored_listen_port)
     logger.info('{} - {}'.format(log_id, event))
@@ -588,8 +585,8 @@ def get_listen_port(logger, log_id):
     # -------------------------------------------- #
     print('')
     print(':============================================================:')
-    print(': UDP port to listen on for incoming alarms forwarded by an  :')
-    print(': OVOC server. Alarms are expected to be in SYSLOG format.   :')
+    print(': UDP port to listen on for incoming CPE capture app command :')
+    print(': requests.                                                  :')
     print(':                                                            :')
     print(': NOTE: Entered port should be in the range (1025 - 65535)   :')
     print(':============================================================:')
@@ -621,33 +618,32 @@ def get_listen_port(logger, log_id):
     logger.info('{} - {}'.format(log_id, event))
     print('  - INFO: {}'.format(event))
 
-    # --------------------------------------------------------------- #
-    # Check if updates are necessary to the 'ovoc_app_config.py' file #
-    # --------------------------------------------------------------- #
+    # ------------------------------------------------------ #
+    # Check if updates are necessary to the 'config.py' file #
+    # ------------------------------------------------------ #
     if not update_listen_port(logger, log_id, listen_port):
-        event = 'Failed to update "ovoc_app_config.py" file!'
+        event = 'Failed to update "config.py" file!'
         logger.warning('{} - {}'.format(log_id, event))
         print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
 
     return listen_port
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: update_max_retries                                                #
+# FUNCTION: update_interface_name                                             #
 #                                                                             #
-# Update the value stored in the 'ovoc_app_config.py' file if necessary that  #
-# defines the maximum number of REST API retry attempts are made before       #
-# failing the task.                                                           #
+# Update the value stored in the 'config.py' file if necessary that defines   #
+# the network interface name to use for capturing CPE network traffic.        #
 #                                                                             #
 # Parameters:                                                                 #
-#     logger       - File handler for storing logged actions                  #
-#     log_id       - Unique identifier for this devices log entries           #
-#     max_retries  - Maximum number of REST API retry attempts                #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     interface_name - Network interface name to use for CPE traffic captures #
 #                                                                             #
 # Return:                                                                     #
 #    status - Boolean: Success or failure of the update action.               #
 # --------------------------------------------------------------------------- #
-def update_max_retries(logger, log_id, max_retries):
-    """Update max REST API retry attempts value that is stored in 'ovoc_app_config.py' file."""
+def update_interface_name(logger, log_id, interface_name):
+    """Update network interface name used for traffic capture that is stored in 'config.py' file."""
 
     status = False
     do_update = False
@@ -655,29 +651,29 @@ def update_max_retries(logger, log_id, max_retries):
     # --------------------------------------------------------- #
     # Read in current configuration file contents. The contents #
     # will be modified by REGEX substitutions and written back  #
-    # the the 'ovoc_app_config.py' file if differences exist.   #
+    # the the 'config.py' file if differences exist.            #
     # --------------------------------------------------------- #
     config_file_contents = ''
-    event = 'Reading contents of "ovoc_app_config.py" file.'
+    event = 'Reading contents of "config.py" file.'
     logger.debug('{} - {}'.format(log_id, event))
     try:
-        with open('./ovoc_app_config.py', 'r') as fp:
+        with open('./config.py', 'r') as fp:
             config_file_contents = fp.read()
     except Exception as err:
-        event = 'Unable to read "ovoc_app_config.py" file - Error: {}'.format(err)
+        event = 'Unable to read "config.py" file - Error: {}'.format(err)
         logger.error('{} - {}'.format(log_id, event))
         print('  - ERROR: {}'.format(event))
 
     else:
-        event = 'Successfully read in "ovoc_app_config.py" file.'
+        event = 'Successfully read in "config.py" file.'
         logger.debug('{} - {}'.format(log_id, event))
 
         try:
-            # ------------------------------- #
-            # Check 'max_retries' for changes #
-            # ------------------------------- #
-            if max_retries != "" and int(max_retries) != ovoc_app_config.max_retries:
-                result = re.sub("(?s)max_retries = .*?$", "max_retries = " + str(max_retries), config_file_contents, 1, re.MULTILINE)
+            # ---------------------------------- #
+            # Check 'interface_name' for changes #
+            # ---------------------------------- #
+            if interface_name != "" and interface_name != config.interface_name:
+                result = re.sub("(?s)interface_name = .*?$", "interface_name = '" + str(interface_name) + "'", config_file_contents, 1, re.MULTILINE)
 
                 if result != config_file_contents:
                     # ------------------------------------------------- #
@@ -685,14 +681,14 @@ def update_max_retries(logger, log_id, max_retries):
                     # ------------------------------------------------- #
                     config_file_contents = result
                     do_update = True
-                    event = 'Max allowed REST API retry attempts update successfully prepared.'
+                    event = 'Network interface name used for traffic captures update successfully prepared.'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  - INFO: {}'.format(event))
                 else:
                     # -------------------------------------------- #
                     # Failed to modify configuration file contents #
                     # -------------------------------------------- #
-                    event = 'Failed to prepare update for max allowed REST API retry attempts!'
+                    event = 'Failed to prepare update for network interface name used for traffic captures!'
                     logger.error('{} - {}'.format(log_id, event))
                     print('  - ERROR: {}'.format(event))
 
@@ -713,109 +709,109 @@ def update_max_retries(logger, log_id, max_retries):
             # ------------------------------- #
             if do_update:
                 try:
-                    with open('./ovoc_app_config.py', 'w') as fp:
+                    with open('./config.py', 'w') as fp:
                         fp.write(config_file_contents)
                     status = True
-                    event = 'Successfully updated "ovoc_app_config.py" file'
+                    event = 'Successfully updated "config.py" file'
                     logger.info('{} - {}'.format(log_id, event))
                     print('  - INFO: {}'.format(event))
                 except Exception as err:
-                    event = 'Unable to write "ovoc_app_config.py" file - Error: {}'.format(err)
+                    event = 'Unable to write "config.py" file - Error: {}'.format(err)
                     logger.error('{} - {}'.format(log_id, event))
                     print('  - ERROR: {}'.format(event))
 
     return status
 
-# --------------------------------------------------------------------------- #
-# FUNCTION: get_max_retries                                                   #
-#                                                                             #
-# Get value for maximum number of REST API retry attempts will be made to a   #
-# CPE device before the task is marked as failed.                             #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger - File handler for storing logged actions                        #
-#     log_id - Unique identifier for this devices log entries                 #
-#                                                                             #
-# Return:                                                                     #
-#    max_retries - Integer value in the range (1 - 100)                       #
-# --------------------------------------------------------------------------- #
-def get_max_retries(logger, log_id):
-    """Get value for max allowed REST API retry attempts to a CPE device."""
+# ---------------------------------------------------------------------------- #
+# FUNCTION: get_interface_name                                                 #
+#                                                                              #
+# Get network interface that is used for CPE device network traffic captures.  #
+#                                                                              #
+# Parameters:                                                                  #
+#     logger - File handler for storing logged actions                         #
+#     log_id - Unique identifier for this devices log entries                  #
+#                                                                              #
+# Return:                                                                      #
+#    interface_name - String value to identify the network interface name.     #
+# ---------------------------------------------------------------------------- #
+def get_interface_name(logger, log_id):
+    """Get network interface name to use for CPE traffic captures."""
 
-    max_retries = 5
+    stored_interface_name = config.interface_name
 
-    stored_max_retries = ovoc_app_config.max_retries
-
-    event = 'Retrieved stored max allowed REST API retry attempts value: [{}]'.format(stored_max_retries)
+    event = 'Retrieved stored network interface name: [{}]'.format(stored_interface_name)
     logger.info('{} - {}'.format(log_id, event))
 
-    # ---------------------------------------------------- #
-    # Allow modification of stored REST API retry attempts #
-    # ---------------------------------------------------- #
+    # ---------------------------------------------------------------- #
+    # Get list of valid interfaces from /proc/net/dev on linux systems #
+    # ---------------------------------------------------------------- #
+    interfaces = os.popen("cat /proc/net/dev | tail -n +3 | awk -F':' '{gsub(/ /, \"\", $0); print $1}' | tr '\n' ','").read().strip(',')
+    interface_list = interfaces.split(',')
+
+    # ------------------------------------------- #
+    # Allow modification of stored interface name #
+    # ------------------------------------------- #
     print('')
     print(':============================================================:')
-    print(': Maximum number of REST API retry attempts allowed when     :')
-    print(': sending requests to CPE devices.                           :')
-    print(':                                                            :')
-    print(': NOTE: Entered value should be in the range (1 - 100)       :')
+    print(': Network interface name to use for CPE traffic captures.    :')
     print(':============================================================:')
-    got_max_retries = False
-    while not got_max_retries:
-
-        this_max_retries = raw_input('Enter REST API retry attempts: (1-100) [{}] '.format(stored_max_retries))
-        print('Max = [{}]'.format(this_max_retries))
-        if this_max_retries == '':
-            got_max_retries = True
-            max_retries = stored_max_retries
-        else:
-            try:
-                this_max_retries = int(this_max_retries)
-                if this_max_retries >= 1 and this_max_retries <= 100:
-                    got_max_retries = True
-                    max_retries = this_max_retries
-                else:
-                    event = 'Invalid setting: [{}]. Must be a value in the range (1-100).'.format(this_max_retries)
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {} Try again.\n'.format(event))
-                    got_max_retries = False
-            except ValueError:
-                event = 'Invalid number: [{}]. Must be a value in the range (1-100).'.format(this_max_retries)
+    this_interface_name = ''
+    while this_interface_name == '':
+        this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name)))
+        event = 'Entered network interface name: [{}]'.format(this_interface_name)
+        logger.info('{} - {}'.format(log_id, event))
+        if this_interface_name == '':
+            this_interface_name = stored_interface_name
+            if this_interface_name != '':
+                event = 'Using existing network interface name: [{}]'.format(this_interface_name)
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                event = 'Must enter an interface name to use for capturing CPE traffic.'
                 logger.error('{} - {}'.format(log_id, event))
-                print('  - ERROR: {} Try again.\n'.format(event))
-                got_max_retries = False
+                print('  - ERROR: {} Try again.'.format(event))
+        else:
+            if this_interface_name in interface_list:
+                event = 'Modifying network interface name to: [{}]'.format(this_interface_name)
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                event = 'Interface name must be a value in this list: ({})'.format('|'.join(interface_list))
+                logger.error('{} - {}'.format(log_id, event))
+                print('  - ERROR: {} Try again.'.format(event))
+                this_interface_name = ''
 
-    event = 'Set REST API retry attempts to: [{}]'.format(max_retries)
+    event = 'Set network interface name for captures to: [{}]'.format(this_interface_name)
     logger.info('{} - {}'.format(log_id, event))
     print('  - INFO: {}'.format(event))
 
-    # --------------------------------------------------------------- #
-    # Check if updates are necessary to the 'ovoc_app_config.py' file #
-    # --------------------------------------------------------------- #
-    if not update_max_retries(logger, log_id, max_retries):
-        event = 'Failed to update "ovoc_app_config.py" file!'
+    # ------------------------------------------------------ #
+    # Check if updates are necessary to the 'config.py' file #
+    # ------------------------------------------------------ #
+    if not update_interface_name(logger, log_id, this_interface_name):
+        event = 'Failed to update "config.py" file!'
         logger.warning('{} - {}'.format(log_id, event))
         print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
 
-    return max_retries
+    return this_interface_name
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: start_capture                                                     #
 #                                                                             #
-# Start network traffic captures on a specifc CPE device. The captures are    #
-# started by sending the appropriate CLI script command to the devices using  #
-# a REST API request.                                                         #
+# Start network traffic capture on a specifc CPE device. The capture is       #
+# started by sending the appropriate shell script command spawn the 'tcpdump' #
+# application.                                                                #
 #                                                                             #
 # Parameters:                                                                 #
-#     logger        - File handler for storing logged actions                 #
-#     log_id        - Unique identifier for this devices log entries          #
-#     target_device - CPE device to start network traffic capture on          #
-#     devices_info  - Dictionary of targeted devices                          #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     target_device  - CPE device to start network traffic capture filter on  #
+#     interface_name - Network interface name to start CPE capture on         #
+#     devices_info   - Dictionary of targeted devices                         #
 #                                                                             #
 # Return:                                                                     #
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def start_capture(logger, log_id, target_device, devices_info):
+def start_capture(logger, log_id, target_device, interface_name, devices_info):
     """Start network traffic capture on specific device in the 'devices_info' dictionary."""
 
     device_found = False
@@ -828,10 +824,6 @@ def start_capture(logger, log_id, target_device, devices_info):
             logger.debug('{} - {}'.format(log_id, event))
 
             this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
-
-            print('Starting network traffic capture on CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
 
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
@@ -839,37 +831,76 @@ def start_capture(logger, log_id, target_device, devices_info):
             device_status = ''
             device_severity = ''
             last_description = ''
+            filename = ''
 
-            # ---------------------------------- #
-            # Start debug capture on this device #
-            # ---------------------------------- #
-            submitted = False
-            attempt = 1
-            while attempt <= ovoc_app_config.max_retries and not submitted:
+            started = False
 
-                # ---------------------------------------- #
-                # Attempt to start debug capture on device #
-                # ---------------------------------------- #
-                event = 'Attempting to start debug capture on CPE device...'
+            if this_device['state'].lower() == 'not active':
+
+                print('Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
+
+                # -------------------------------- #
+                # Create filename to store pcap as #
+                # -------------------------------- #
+                file_timestamp = datetime.now()
+                file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
+                filename = 'tmp_device_{}_{}.pcap'.format(this_device_address, file_timestamp)
+                filename = re.sub(':', '.', filename)
+
+                # ------------------------------------------- #
+                # Attempt to start tcpdump capture for device #
+                # ------------------------------------------- #
+                event = 'Attempting to start tcpdump capture on CPE device...'
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                cli_script = """
-debug capture data physical stop
-debug capture data physical eth-wan
-debug capture data physical start
-                """
-                start_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                start_capture_task = {}
+                start_capture_task['task'] = 'Start capture'
+                start_capture_task['description'] = 'Failed to start tcpdump capture for device!'
+                task_timestamp = datetime.now()
+                start_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                start_capture_task['filename'] = filename
+
+                # --------------------------------------------------------------------- #
+                # Create captures with with rotating files for the targeted CPE device. #
+                #   -i    : <interface name> from the interactive entry                 #
+                #   -w    : Temporary base capture filename. Will be renamed after a    #
+                #           STOP command is received from the CPE capture app.          #
+                #   -W 3  : Number of files to save before overwriting older files      #
+                #   -C 10 : Max file size in MB before creating a new file              #
+                #   host  : Target CPE device to filter on                              #
+                #                                                                       #
+                # Send normal output to /dev/null and echo out the PID number to save   #
+                # --------------------------------------------------------------------- #
+                capture_cmd = "nohup tcpdump -i {} -w ./captures/{} -W 3 -C 10 host {} > /dev/null 2>&1 & echo $!".format(interface_name, filename, this_device_address)
+
+                pid = os.popen(capture_cmd).read().strip()
+
+                # ------------------------------------------------------------ #
+                # Save PID in 'devices_info' dictionary record for this device #
+                # ------------------------------------------------------------ #
+                devices_info['devices'][device_index]['pid'] = pid
+
+                try:
+                    os.kill(int(pid), 0)
+                except OSError:
+                    event = '{}'.format(err)
+                    logger.error('{} - {}'.format(log_id, event))
+                    start_capture_task['status'] = 'Failure'
+                    start_capture_task['description'] = event
+                    print('  - ERROR: {}'.format(event))
+                else:
+                    start_capture_task['status'] = 'Success'
+                    event = 'Started capture on device as file: [{}]'.format(filename)
+                    start_capture_task['description'] = event
+                    started = True
 
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                start_capture_task['task'] = 'Start capture'
-                task_timestamp = datetime.now()
-                start_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                 devices_info['devices'][device_index]['tasks'].append(start_capture_task.copy())
-
                 device_status = start_capture_task['status']
+                logger.debug('{} - {}'.format(log_id, device_status))
                 last_description = start_capture_task['description']
 
                 # --------------- #
@@ -877,77 +908,22 @@ debug capture data physical start
                 # --------------- #
                 event = start_capture_task['description']
                 if device_status.lower() == 'success':
-                    submitted = True
                     logger.info('{} - {}'.format(log_id, event))
                     print('    - INFO: {}'.format(event))
                 else:
                     logger.error('{} - {}'.format(log_id, event))
                     print('    - ERROR: {}'.format(event))
 
-                attempt += 1
-
-            started = False
-            if submitted:
-                attempt = 1
-                while attempt <= ovoc_app_config.max_retries and not started:
-                    # --------------------------------- #
-                    # Attempt to verify capture started #
-                    # --------------------------------- #
-                    event = 'Verifying debug capture started...'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  + {}'.format(event))
-
-                    cli_script = """
-debug capture data physical show
-                    """
-                    verify_started_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
-
-                    # --------------- #
-                    # Display results #
-                    # --------------- #
-                    if re.search('Debug capture physical is active', verify_started_task['output']):
-                        started = True
-                        event = verify_started_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
-                        event = 'Debug capture is active.'
-                        verify_started_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    elif re.search('Debug capture physical is not active', verify_started_task['output']):
-                        started = False
-                        event = verify_started_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
-                        event = 'Failed to start debug capture on device!'
-                        verify_started_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    else:
-                        event = verify_started_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - ERROR: {}'.format(event))
-
-                    # ---------------------- #
-                    # Store task information #
-                    # ---------------------- #
-                    verify_started_task['task'] = 'Verify started'
-                    task_timestamp = datetime.now()
-                    verify_started_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    devices_info['devices'][device_index]['tasks'].append(verify_started_task.copy())
-
-                    device_status = verify_started_task['status']
-                    last_description = verify_started_task['description']
-
-                attempt += 1
+            else:
+                device_status = 'Failure'
+                last_description = 'Traffic capture is still active for CPE device!'
 
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
             devices_info['devices'][device_index]['status'] = device_status
             devices_info['devices'][device_index]['description'] = last_description
+            devices_info['devices'][device_index]['tempCapture'] = filename
 
             if started:
                 devices_info['devices'][device_index]['state'] = 'active'
@@ -970,22 +946,27 @@ debug capture data physical show
 # --------------------------------------------------------------------------- #
 # FUNCTION: stop_capture                                                      #
 #                                                                             #
-# Stop network traffic captures on a specifc CPE device. The captures are     #
-# stopped by sending the appropriate CLI script command to the devices using  #
-# a REST API request.                                                         #
+# Stop network traffic capture on a specifc CPE device. The capture is        #
+# stopped by sending the appropriate os.kill command to the running 'tcpdump' #
+# application.                                                                #
+#                                                                             #
+# The filename used on the CPE capture app script is used here so that there  #
+# is alignment and and easy way to correlate the capture files that were      #
+# synchronized.                                                               #
 #                                                                             #
 # Parameters:                                                                 #
-#     logger        - File handler for storing logged actions                 #
-#     log_id        - Unique identifier for this devices log entries          #
-#     target_device - CPE device to start network traffic capture on          #
-#     devices_info  - Dictionary of targeted devices                          #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     target_device  - CPE device to stop network traffic capture filter on   #
+#     filename       - Capture filename used for the CPE capture app script   #
+#     devices_info   - Dictionary of targeted devices                         #
 #                                                                             #
 # Return:                                                                     #
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def stop_capture(logger, log_id, target_device, devices_info):
-    """Stop network traffic capture on specific device in the 'devices' list."""
+def stop_capture(logger, log_id, target_device, filename, devices_info):
+    """Stop network traffic capture on specific device in the 'devices_info' dictionary."""
 
     device_found = False
     device_index = 0
@@ -997,10 +978,6 @@ def stop_capture(logger, log_id, target_device, devices_info):
             logger.debug('{} - {}'.format(log_id, event))
 
             this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
-
-            print('Stopping network traffic capture on CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
 
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
@@ -1009,34 +986,51 @@ def stop_capture(logger, log_id, target_device, devices_info):
             device_severity = ''
             last_description = ''
 
-            # --------------------------------- #
-            # Stop debug capture on this device #
-            # --------------------------------- #
-            submitted = False
-            attempt = 1
-            while attempt <= ovoc_app_config.max_retries and not submitted:
+            stopped = False
 
-                # --------------------------------------- #
-                # Attempt to stop debug capture on device #
-                # --------------------------------------- #
-                event = 'Attempting to stop debug capture on CPE device...'
+            if this_device['state'].lower() == 'active':
+
+                print('Stopping network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
+
+                # ------------------------------------------ #
+                # Attempt to stop tcpdump capture for device #
+                # ------------------------------------------ #
+                event = 'Attempting to stop tcpdump capture on CPE device...'
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                cli_script = """
-debug capture data physical stop
-                """
-                stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                stop_capture_task = {}
+                stop_capture_task['task'] = 'Stop capture'
+                stop_capture_task['description'] = 'Failed to stop tcpdump capture for device!'
+                task_timestamp = datetime.now()
+                stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                stop_capture_task['filename'] = filename
+
+                # ----------------------------------------------------------- #
+                # Get PID in 'devices_info' dictionary record for this device #
+                # ----------------------------------------------------------- #
+                pid = devices_info['devices'][device_index]['pid']
+
+                try:
+                    os.kill(int(pid), 15)
+                except OSError:
+                    event = '{}'.format(err)
+                    logger.error('{} - {}'.format(log_id, event))
+                    stop_capture_task['status'] = 'Failure'
+                    stop_capture_task['description'] = event
+                    print('  - ERROR: {}'.format(event))
+                else:
+                    stop_capture_task['status'] = 'Success'
+                    event = 'Stopped capture on device as file: [{}]'.format(filename)
+                    stop_capture_task['description'] = event
+                    stopped = True
 
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                stop_capture_task['task'] = 'Stop capture'
-                task_timestamp = datetime.now()
-                stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                 devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
-
                 device_status = stop_capture_task['status']
+                logger.debug('{} - {}'.format(log_id, device_status))
                 last_description = stop_capture_task['description']
 
                 # --------------- #
@@ -1044,215 +1038,84 @@ debug capture data physical stop
                 # --------------- #
                 event = stop_capture_task['description']
                 if device_status.lower() == 'success':
-                    submitted = True
                     logger.info('{} - {}'.format(log_id, event))
                     print('    - INFO: {}'.format(event))
                 else:
                     logger.error('{} - {}'.format(log_id, event))
                     print('    - ERROR: {}'.format(event))
 
-                attempt += 1
+                # --------------------------------------------------------------- #
+                # Rename temporary tcpdump capture filenames to match CPE capture #
+                # --------------------------------------------------------------- #
+                renamed = True
+                if stopped:
 
-            stopped = False
-            if submitted:
-                attempt = 1
-                while attempt <= ovoc_app_config.max_retries and not stopped:
-                    # --------------------------------- #
-                    # Attempt to verify capture stopped #
-                    # --------------------------------- #
-                    event = 'Verifying debug capture stopped...'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  + {}'.format(event))
+                    rename_capture_task = {}
+                    rename_capture_task['status'] = 'Success'
+                    rename_capture_task['task'] = 'Rename capture files'
+                    rename_capture_task['description'] = 'Successfully renamed capture files to match CPE capture script!'
+                    task_timestamp = datetime.now()
+                    rename_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    rename_capture_task['filename'] = filename
 
-                    cli_script = """
-debug capture data physical show
-                    """
-                    verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                    # -------------------------------------------------------------- #
+                    # Get temporary filename used when starting the tcpdump captures #
+                    # -------------------------------------------------------------- #
+                    path = './captures/'
+                    temp_filename = devices_info['devices'][device_index]['tempCapture']
 
-                    # --------------- #
-                    # Display results #
-                    # --------------- #
-                    if re.search('Debug capture physical is not active', verify_stopped_task['output']):
-                        stopped = True
-                        event = verify_stopped_task['description']
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
+                    # -------------------------------------------------- #
+                    # Rename up to 3 pcap files. The '-W 3' parameter on #
+                    # the tcdump command in 'start_captures' sets the    #
+                    # number of pcap files that are created per device.  #
+                    # -------------------------------------------------- #
+                    for index in range(0, 2, 1):
 
-                        event = 'Debug capture is not active.'
-                        verify_stopped_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    elif re.search('Debug capture physical is active', verify_stopped_task['output']):
-                        stopped = False
-                        event = verify_stopped_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
+                        if os.path.exists(path + temp_filename + str(index)):
 
-                        event = 'Failed to stop debug capture on device!'
-                        verify_stopped_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    else:
-                        event = verify_stopped_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - ERROR: {}'.format(event))
+                            # ------------------------------------------ #
+                            # Set base filename for local files. Tcpdump #
+                            # rotating filenames are in the format:      #
+                            #     basename.pcap0                         #
+                            #     basename.pcap1                         #
+                            #     basename.pcap2                         #
+                            # Change to be as follows:                   #
+                            #     basename-0.pcap                        #
+                            #     basename-1.pcap                        #
+                            #     basename-2.pcap                        #
+                            # ------------------------------------------ #
+                            base_name = filename.rstrip('.pcap')
+                            local_file = path + base_name + '-' + str(index) + '.pcap'
+
+                            # ------------------------------------------- #
+                            # Rename to match CPE capture script filename #
+                            # ------------------------------------------- #
+                            try:
+                                os.rename(path + temp_filename + str(index), local_file)
+                            except Exception as err:
+                                event = 'Capture file renaming error: {}'.format(err)
+                                logger.error('{} - {}'.format(log_id, event))
+                                print('    - ERROR: {}'.format(event))
+                                rename_capture_task['status'] = 'Failure'
+                                rename_capture_task['description'] = event
+                                renamed = False
+                        else:
+                            event = 'Capture file may not exist: [{}]'.format(path + temp_filename + str(index))
+                            logger.info('{} - {}'.format(log_id, event))
 
                     # ---------------------- #
                     # Store task information #
                     # ---------------------- #
-                    verify_stopped_task['task'] = 'Verify stopped'
-                    task_timestamp = datetime.now()
-                    verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    devices_info['devices'][device_index]['tasks'].append(verify_stopped_task.copy())
-
-                    device_status = verify_stopped_task['status']
-                    last_description = verify_stopped_task['description']
-
-                attempt += 1
-
-            # -------------------------------------- #
-            # Store task information at device level #
-            # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
-
-            if stopped:
-                devices_info['devices'][device_index]['state'] = 'not active'
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
-            else:
-                devices_info['devices'][device_index]['state'] = 'active'
-                devices_info['devices'][device_index]['severity'] = 'MAJOR'
-
-        device_index += 1
-
-    if not device_found:
-        event = 'Device not found in monitored devices list!'
-        logger.error('{} - {}'.format(log_id, event))
-        print('  + ERROR: {}'.format(event))
-
-    return devices_info
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: retrieve_capture                                                  #
-#                                                                             #
-# Use the paramiko library to get the PCAP file stored locally on the device  #
-# using the SFTP protocol.                                                    #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger        - File handler for storing logged actions                 #
-#     log_id        - Unique identifier for this devices log entries          #
-#     target_device - CPE device to start network traffic capture on          #
-#     devices_info  - Dictionary of targeted devices                          #
-#                                                                             #
-# Return:                                                                     #
-#    devices_info - Modified dictionary containing a record for each device   #
-#                   that contains all the tasks executed against that device. #
-# --------------------------------------------------------------------------- #
-def retrieve_capture(logger, log_id, target_device, devices_info):
-    """Retrieve the locally stored PCAP file on the device."""
-
-    device_found = False
-    device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
-
-            device_found = True
-            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
-            logger.debug('{} - {}'.format(log_id, event))
-
-            this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
-
-            retrieved = False
-
-            if this_device['state'].lower() == 'not active':
-
-                print('Retrieving network traffic capture from CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
-
-                # ------------------------------------------------------- #
-                # Track information to summarize each devices info record #
-                # ------------------------------------------------------- #
-                device_status = ''
-                device_severity = ''
-                last_description = ''
-
-                # ------------------------------------------------- #
-                # Retrieve debug capture file stored on this device #
-                # ------------------------------------------------- #
-                attempt = 1
-                while attempt <= ovoc_app_config.max_retries and not retrieved:
-
-                    # -------------------------------------------------- #
-                    # Attempt to retrieve debug capture file from device #
-                    # -------------------------------------------------- #
-                    event = 'Attempting to retrieve debug capture file from CPE device...'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('  + {}'.format(event))
-
-                    retrieve_capture_task = {}
-                    retrieve_capture_task['task'] = 'Retrieve capture'
-                    retrieve_capture_task['description'] = 'Failed to retrieve capture from device!'
-                    task_timestamp = datetime.now()
-                    retrieve_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-
-                    ssh = paramiko.SSHClient()
-                    #ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
-                    try:
-                        ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
-                        event = 'Connected to device'
-                        logger.info('{} - {}'.format(log_id, event))
-                        sftp = ssh.open_sftp()
-                        event = 'Successfully started SFTP session'
-                        logger.info('{} - {}'.format(log_id, event))
-                    except Exception as err:
-                        event = '{}'.format(err)
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {}'.format(event))
-
-                    else:
-                        # -------------------------------- #
-                        # Create filename to store pcap as #
-                        # -------------------------------- #
-                        file_timestamp = datetime.now()
-                        file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
-                        filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
-                        filename = re.sub(':', '.', filename)
-
-                        remote_file = '/debug-capture/debug-capture-data.pcap'
-                        local_file = './captures/' + filename
-
-                        try:
-                            sftp.get(remote_file, local_file, prefetch=False)
-                        except Exception as err:
-                            event = '{}'.format(err)
-                            logger.error('{} - {}'.format(log_id, event))
-                            retrieve_capture_task['status'] = 'Failure'
-                            retrieve_capture_task['description'] = event
-                            print('  - ERROR: {}'.format(event))
-                        else:
-                            retrieve_capture_task['status'] = 'Success'
-                            event = 'Stored capture from device as file: [{}]'.format(filename)
-                            retrieve_capture_task['description'] = event
-                            retrieved = True
-
-                        # ---------------------- #
-                        # Store task information #
-                        # ---------------------- #
-                        devices_info['devices'][device_index]['tasks'].append(retrieve_capture_task.copy())
-                        device_status = retrieve_capture_task['status']
-                        logger.debug('{} - {}'.format(log_id, device_status))
-                        last_description = retrieve_capture_task['description']
-
-                    attempt += 1
+                    devices_info['devices'][device_index]['tasks'].append(rename_capture_task.copy())
+                    device_status = rename_capture_task['status']
+                    logger.debug('{} - {}'.format(log_id, device_status))
+                    last_description = rename_capture_task['description']
 
                     # --------------- #
                     # Display results #
                     # --------------- #
-                    event = retrieve_capture_task['description']
+                    event = rename_capture_task['description']
                     if device_status.lower() == 'success':
-                        submitted = True
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
                     else:
@@ -1261,18 +1124,27 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
 
             else:
                 device_status = 'Failure'
-                last_description = 'Debug capture is still active on CPE device!'
+                last_description = 'Traffic capture is not active for CPE device!'
 
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
             devices_info['devices'][device_index]['status'] = device_status
             devices_info['devices'][device_index]['description'] = last_description
+            devices_info['devices'][device_index]['lastCapture'] = filename
 
-            if retrieved:
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
+            if stopped:
+                devices_info['devices'][device_index]['state'] = 'not active'
+                if renamed:
+                    devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                else:
+                    devices_info['devices'][device_index]['severity'] = 'MINOR'
+                    devices_info['devices'][device_index]['lastCapture'] = devices_info['devices'][device_index]['tempCapture']
             else:
-                devices_info['devices'][device_index]['severity'] = 'CRITICAL'
+                devices_info['devices'][device_index]['state'] = 'active'
+                devices_info['devices'][device_index]['severity'] = 'MAJOR'
+
+            break
 
         device_index += 1
 
@@ -1309,13 +1181,28 @@ def parse_message(logger, log_id, message):
     msg_info['type'] = 'unknown'
 
     if re.search('New Alarm -', message):
+
+        # ------------ #
+        # Set defaults #
+        # ------------ #
         msg_info['type'] = 'alarm'
+        msg_info['timestamp'] = ''
+        msg_info['alarmType'] = ''
+        msg_info['alarmMessage'] = ''
+        msg_info['alarmSource'] = ''
+        msg_info['alarm'] = ''
+        msg_info['deviceName'] = ''
+        msg_info['tenant'] = ''
+        msg_info['region'] = ''
+        msg_info['ipAddress'] = ''
+        msg_info['deviceType'] = ''
+        msg_info['deviceSerial'] = ''
+        msg_info['deviceDescription'] = ''
 
         event = 'Matched OVOC alarm'
         logger.debug('{} - {}'.format(log_id, event))
 
         match = re.search('<\d+>(.*?)\s*:\s*New Alarm\s*-\s*(.*?),\s*(.*)\s*Source:(.*?),\s*Description:(.*?),\s*Device Name:(.*?),\s*Tenant:(.*?),\s*Region:(.*?),\s*IP Address:(.*?),\s*Device Type:(.*?),\s*Device Serial:(.*?),\s*Device Description:(.*$)', message)
-
         if match:
             msg_info['timestamp'] = match.group(1).strip()
             msg_info['alarmType'] = match.group(2).strip()
@@ -1331,28 +1218,41 @@ def parse_message(logger, log_id, message):
             msg_info['deviceDescription'] = match.group(12).strip()
 
     elif re.search('^CAPTURE', message):
-        msg_info['type'] = 'request'
 
         event = 'Matched CPE capture script request'
         logger.debug('{} - {}'.format(log_id, event))
 
-        match = re.search('(CAPTURE)\s+(.*$)', message)
+        # ------------ #
+        # Set defaults #
+        # ------------ #
+        msg_info['type'] = 'request'
+        msg_info['request'] = 'CAPTURE'
+        msg_info['device'] = ''
 
+        match = re.search('(CAPTURE)\s+(.*$)', message)
         if match:
             msg_info['request'] = match.group(1).strip()
             msg_info['device'] = match.group(2).strip()
 
     elif re.search('^STOP', message):
+
+        # ------------ #
+        # Set defaults #
+        # ------------ #
         msg_info['type'] = 'request'
+        msg_info['request'] = 'CAPTURE'
+        msg_info['device'] = ''
+        msg_info['filename'] = ''
 
         event = 'Matched CPE capture script request'
         logger.debug('{} - {}'.format(log_id, event))
 
-        match = re.search('(STOP)\s+(.*$)', message)
+        match = re.search('(STOP)\s+(.*?)\s+(.*$)', message)
 
         if match:
             msg_info['request'] = match.group(1).strip()
             msg_info['device'] = match.group(2).strip()
+            msg_info['filename'] = match.group(3).strip()
 
     event = 'Parsed message elements:\n{}'.format(json.dumps(msg_info, indent=4))
     logger.debug('{} - {}'.format(log_id, event))
@@ -1573,7 +1473,7 @@ def main(argv):
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
     # ------------------------------------------- #
-    if rotate_logs(logger, log_id, ovoc_app_config.app_log_file, ovoc_app_config.app_max_log_file_size, ovoc_app_config.app_archived_files):
+    if rotate_logs(logger, log_id, config.app_log_file, config.app_max_log_file_size, config.app_archived_files):
         event = 'Rotation of log files completed'
         logger.info('{} - {}'.format(log_id, event))
 
@@ -1600,7 +1500,10 @@ def main(argv):
     #     "devices": [                                                    #
     #         {                                                           #
     #             "device": "<device address>",                           #
+    #             "status": "Success|Failure",                            #
     #             "state": "not active",                                  #
+    #             "description": "<some description>",                    #
+    #             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",              #
     #             "tasks": []                                             #
     #         },                                                          #
     #         ...                                                         #
@@ -1620,8 +1523,8 @@ def main(argv):
         # To enable, switch the comments on the following 2 lines. #
         # -------------------------------------------------------- #
         #listen_port = get_listen_port(logger, log_id)
-        listen_port = ovoc_app_config.listen_port
-        max_retries = get_max_retries(logger, log_id)
+        listen_port = config.listen_port
+        interface_name = get_interface_name(logger, log_id)
 
     except KeyboardInterrupt:
         print('')
@@ -1666,15 +1569,15 @@ def main(argv):
         logger.info('{} - {}'.format(log_id, event))
         print('{}'.format(event))
 
-        active_devices = 0
+        active_captures = 0
 
-        while (len(devices_info['devices']) == 0 or active_devices > 0):
+        while (len(devices_info['devices']) == 0 or active_captures > 0):
 
             bytes_address_pair = udp_server_socket.recvfrom(buffer_size)
             message = bytes_address_pair[0]
-            address = bytes_address_pair[1]
+            from_address = bytes_address_pair[1]
 
-            event = 'UDP message from: [{}]'.format(address)
+            event = 'UDP message from: [{}]'.format(from_address)
             logger.info('{} - {}'.format(log_id, event))
 
             # ---------------------- #
@@ -1688,7 +1591,7 @@ def main(argv):
             if msg_info['type'] == 'request':
 
                 target_device = msg_info['device']
-                event = 'Received request [{}] from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
+                event = 'Received [{}] request from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
@@ -1733,26 +1636,156 @@ def main(argv):
                     event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
                     logger.debug('{} - {}'.format(log_id, event))
 
-                # ----------------------------------------------------- #
-                # If an 'CAPTURE' request has been received, then start #
-                # 'tcpdump' filtering for this specific device.         #
-                # ----------------------------------------------------- #
+                # ---------------------------------------------------- #
+                # If a 'CAPTURE' request has been received, then start #
+                # 'tcpdump' capturing for this specific device.        #
+                # ---------------------------------------------------- #
                 if msg_info['request'] == 'CAPTURE':
-                    #device['ovocState'] = 'active'
-                    pass
+
+                    # ------------------------------------------------------ #
+                    # Save this command request in 'devices_info' dictionary #
+                    # ------------------------------------------------------ #
+                    devices_info['devices'][device_index]['lastRequest'] = 'CAPTURE'
+
+                    # ----------------------------------------------- #
+                    # Send TRYING response to CPE capture app script. #
+                    # ----------------------------------------------- #
+                    this_response = 'TRYING {}'.format(target_device)
+                    response_type = 'TRYING'
+                    event = 'Sending [TRYING] response for starting capture for device: [{}]'.format(target_device)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Successfully sent response for starting capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        # ------------------------------------------------------- #
+                        # Save this command response in 'devices_info' dictionary #
+                        # ------------------------------------------------------- #
+                        devices_info['devices'][device_index]['lastResponse'] = response_type
+
+                    else:
+                        event = 'Failed to send response for starting capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        devices_info['devices'][device_index]['lastResponse'] = ''
+
+                    # --------------------------------- #
+                    # Start capture for this CPE device #
+                    # --------------------------------- #
+                    devices_info = start_capture(logger, log_id, target_device, interface_name, devices_info)
+
+                    if devices_info['devices'][device_index]['state'].lower() == 'active':
+                        # ------------------------------------------- #
+                        # Send OK response to CPE capture app script. #
+                        # ------------------------------------------- #
+                        this_response = 'OK {}'.format(target_device)
+                        response_type = 'OK'
+                    else:
+                        this_response = 'FAIL {}'.format(target_device)
+                        response_type = 'FAIL'
+
+                    event = 'Sending response for starting capture on OVOC server: [{}]'.format(this_response)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Successfully sent response for starting capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        # ------------------------------------------------------- #
+                        # Save this command response in 'devices_info' dictionary #
+                        # ------------------------------------------------------- #
+                        devices_info['devices'][device_index]['lastResponse'] = response_type
+
+                    else:
+                        event = 'Failed to send response for starting capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        devices_info['devices'][device_index]['lastResponse'] = ''
+
+                # ------------------------------------------------ #
+                # If a 'STOP' request has been received, then stop #
+                # 'tcpdump' capturing for this specific device.    #
+                # ------------------------------------------------ #
+                if msg_info['request'] == 'STOP':
+
+                    # ------------------------------------------------------ #
+                    # Save this command request in 'devices_info' dictionary #
+                    # ------------------------------------------------------ #
+                    devices_info['devices'][device_index]['lastRequest'] = 'STOP'
+
+                    # ----------------------------------------------- #
+                    # Send TRYING response to CPE capture app script. #
+                    # ----------------------------------------------- #
+                    this_response = 'TRYING {}'.format(target_device)
+                    response_type = 'TRYING'
+                    event = 'Sending [TRYING] response for stopping capture for device: [{}]'.format(target_device)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Successfully sent response for stopping capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        # ------------------------------------------------------- #
+                        # Save this command response in 'devices_info' dictionary #
+                        # ------------------------------------------------------- #
+                        devices_info['devices'][device_index]['lastResponse'] = response_type
+
+                    else:
+                        event = 'Failed to send response for stopping capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        devices_info['devices'][device_index]['lastResponse'] = ''
+
+                    # -------------------------------- #
+                    # Stop capture for this CPE device #
+                    # -------------------------------- #
+                    devices_info = stop_capture(logger, log_id, target_device, msg_info['filename'], devices_info)
+
+                    if devices_info['devices'][device_index]['state'].lower() == 'not active':
+                        # ------------------------------------------- #
+                        # Send OK response to CPE capture app script. #
+                        # ------------------------------------------- #
+                        this_response = 'OK {}'.format(target_device)
+                        response_type = 'OK'
+                    else:
+                        this_response = 'FAIL {}'.format(target_device)
+                        response_type = 'FAIL'
+
+                    event = 'Sending response for stopping capture on OVOC server: [{}]'.format(this_response)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Successfully sent response for stopping capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        # ------------------------------------------------------- #
+                        # Save this command response in 'devices_info' dictionary #
+                        # ------------------------------------------------------- #
+                        devices_info['devices'][device_index]['lastResponse'] = response_type
+
+                    else:
+                        event = 'Failed to send response for stopping capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        devices_info['devices'][device_index]['lastResponse'] = ''
 
             else:
                 event = 'Received unknown message to process! Check logs for details.'
                 logger.warning('{} - {}'.format(log_id, event))
                 print('  + WARNING: {}'.format(event))
 
-            # -------------------------------------------- #
-            # Check for any CPE devices actively capturing #
-            # -------------------------------------------- #
-            active_devices = 0
+            # ------------------------------------------------- #
+            # Check for any CPE devices actively being captured #
+            # ------------------------------------------------- #
+            active_captures = 0
             for device in devices_info['devices']:
                 if device['state'].lower() == 'active':
-                    active_devices += 1
+                    active_captures += 1
 
             # ------------------------------------------------ #
             # For debugging - Output 'devices_info' dictionary #

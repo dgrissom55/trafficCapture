@@ -32,16 +32,8 @@ app_archived_files = 10
 listen_port = 20001
 
 # ------------------------------------------------------------------- #
-# UDP port that the complementary traffic capture Python script on    #
-# the CPE controlling server is listening on. Command responses are   #
-# sent to the CPE app when starting and stopping 'tcpdump' traffic    #
-# captures for the targeted CPE devices.                              #
-# ------------------------------------------------------------------- #
-cpe_listen_port = 20001
-
-# ------------------------------------------------------------------- #
-# Max retries for failed attempts to spawn 'tcpdump' captures.        #
+# Network interface name to use for CPE traffic captures.             #
 # NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
-max_retries = 2
+interface_name = 'ens192'
 

@@ -10,6 +10,10 @@ __pycache__/
 tmp/
 logs/
 captures/
+cpe_capture_app/logs/
+cpe_capture_app/captures/
+ovoc_capture_app/logs/
+ovoc_capture_app/captures/
 
 # Distribution / packaging
 .Python
