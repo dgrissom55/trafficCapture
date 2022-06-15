@@ -220,5 +220,5 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 [license-url]: https://github.com/dgrissom55/trafficCapture/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
-[product-screenshot]: images/capture_flow.png
+[product-screenshot]: images/capturing_flow.png
 
