@@ -85,6 +85,8 @@ devices information. The following is an example of what is tracked:
              "state": "active|not active",
              "description": "<some description>",
              "lastCapture": "<last stopped capture filename>",
+             "lastRequest": "<some command request>",
+             "lastResponse": "<some command response>",
              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
              "tasks": [
                  {

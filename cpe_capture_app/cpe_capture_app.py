@@ -85,6 +85,8 @@ devices information. The following is an example of what is tracked:
              "events": "Success|Failure",
              "ovocState": "active|not active",
              "description": "<some description>",
+             "lastRequest": "<some command request>",
+             "lastResponse": "<some command response>",
              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
              "tasks": [
                  {
