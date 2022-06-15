@@ -58,10 +58,7 @@
     </li>
     <li><a href="#usage">Usage</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgments">Acknowledgments</a></li>
   </ol>
 </details>
 
@@ -99,8 +96,9 @@ A major part of the interactive input to the CPE capture script (`cpe_capture_ap
 On the OVOC servers, the network captures are performed by issuing system calls to the `tcpdump` app. To start a capture on the OVOC server, the CPE capture script sends a `CAPTURE` command to the appropriate OVOC server to inform it which CPE traffic should be captured. The OVOC capture script responds with a `TRYING` when setting up the tcpdump, and then an `OK` response when the tcpdump process is running. The response will be `FAIL` if the capture fails to be started on the OVOC server.
 
 The captures on both the CPE device and the OVOC server are stopped after the `cpe_capture_app.py` script receives the `Connection Lost` SNMP alarm. Each OVOC server in this version of the project must be manually configured with a SNMP forwarding rule to send any received `Connection Lost` alarms to the CPE capture script.
-
-![Select Devices Screen Shot][select-devices-screenshot] ![Select Alarms Screen Shot][select-alarms-screenshot] ![Select Destination Screen Shot][select-destination-screenshot]
+<p>
+  (<a href="#ovoc">See the OVOC server prerequisites below.</a>)
+</p>
 
 The alarm forwarded from the OVOC servers should be in `SYSLOG` format so that the `cpe_capture_app.py` script can properly parse the contents of the alarm. This SNMP alarm forwarding rule will be automatically created in the appropriate OVOC servers in future releases. Once the alarm has been processed, the CPE capture script will send a `STOP` message to the OVOC server to trigger it to kill the tcpdump process for that CPE device. The `STOP` message also contains the filename of the PCAP capture file retrieved from an SFTP transfer of a stopped CPE `debug capture`. The OVOC server renameds its `tcpdump` files to match the filename of the CPE device for easier correlation.
 
@@ -232,8 +230,17 @@ On the servers hosting the CPE capture script: `cpe_capture_app.py`
   ```
 <br>
 
-On the OVOC servers hosting the capture script: `ovo_capture_app.py`
+On the OVOC servers hosting the capture script: `ovoc_capture_app.py`
 * No prerequisites
+<br>
+
+<div id="ovoc"></div>
+
+OVOC Server:
+* SNMP alarms must be manually configured to foward to the CPE capture script:
+
+<img src="images/alarm_fwd_select_devices.png" height="639"> <img src="images/alarm_fwd_select_alarm.png" height="639"> <img src="images/alarm_fwd_set_type_and_destination.png" height="639">
+
 
 <br>
 
@@ -269,9 +276,8 @@ On the servers hosting the CPE capture script:
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources.
-
-_For more examples, please refer to the [Documentation](https://example.com)_
+1. Run `ovoc_capture_app.py` on OVOC server managing a targeted CPE device.
+2. Run `cpe_capture_app.py` on server that has access to both the CPE device and also the associated OVOC server.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -280,42 +286,14 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Feature 1
-- [ ] Feature 2
-- [ ] Feature 3
-    - [ ] Nested Feature
+- [ ] Add support for capturing traffic on Mediant Gateway and SBC devices.
+- [ ] Add automate creation of SNMP forwarding rules to the `ovoc_capture_app.py` script.
 
-See the [open issues](https://github.com/dgrissom55/trafficCapture/issues) for a full list of proposed features (and known issues).
+     * When a `CAPTURE` request is received by the OVOC capture script, if a SNMP fowarding rule doesn't already exist for the CPE capture script that sent the request, then a new rule will be added.
+- [ ] Create CSV file that has records for each device and details every event and task performed against it.
+
 
 <p align="right">(<a href="#top">back to top</a>)</p>
-
-
-
-<!-- CONTRIBUTING -->
-## Contributing
-
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
-
-
-<!-- LICENSE -->
-## License
-
-Distributed under the MIT License. See `LICENSE.txt` for more information.
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
 
 
 <!-- CONTACT -->
@@ -327,16 +305,6 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-* []()
-* []()
-* []()
-
-<p align="right">(<a href="#top">back to top</a>)</p>
 
 
 
