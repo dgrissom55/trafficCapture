@@ -24,10 +24,19 @@ app_log_file = 'ovoc_capture_app.log'
 app_max_log_file_size = 100
 app_archived_files = 10
 
+# ---------------------------------------------------------------------- #
+# Flag to prevent the script from shutting down when there are no active #
+# captures to manage. Setting this to 'y' prevents this script from      #
+# shutting down and it will run indefinitely waiting for CPE commands.   #
+# NOTE: This value can be set via interactive entry from this script.    #
+# ---------------------------------------------------------------------- #
+prevent_shutdown = 'y'
+
 # ------------------------------------------------------------------- #
 # UDP port to listen on for OVOC alarm forwarding and other messages. #
 # It is expected that OVOC will forward the selected alarms in SYSLOG #
 # format.                                                             #
+# NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
 listen_port = 20001
 

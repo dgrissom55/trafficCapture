@@ -2370,8 +2370,8 @@ def main(argv):
         # Disabled interactively setting 'listen_port'.            #
         # To enable, switch the comments on the following 2 lines. #
         # -------------------------------------------------------- #
-        #listen_port = get_listen_port(logger, log_id)
-        listen_port = config.listen_port
+        listen_port = get_listen_port(logger, log_id)
+        #listen_port = config.listen_port
         max_retries = get_max_retries(logger, log_id)
         max_events_per_device = get_max_events_per_device(logger, log_id)
 
