@@ -2,15 +2,6 @@
 Capture network traffic on multiple CPE devices and their associated OVOC servers.
 
 <div id="top"></div>
-<!--
-*** Thanks for checking out the Best-README-Template. If you have a suggestion
-*** that would make this better, please fork the repo and create a pull request
-*** or simply open an issue with the tag "enhancement".
-*** Don't forget to give the project a star!
-*** Thanks again! Now go create something AMAZING! :D
--->
-
-
 
 <!-- PROJECT SHIELDS -->
 <!--
@@ -32,23 +23,19 @@ Capture network traffic on multiple CPE devices and their associated OVOC server
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
-  <a href="https://github.com/github_username/repo_name">
+  <a href="https://github.com/dgrissom55/trafficCapture">
     <img src="images/logo.png" alt="Logo" width="80" height="80">
   </a>
 
-<h3 align="center">project_title</h3>
+<h3 align="center">trafficCapture</h3>
 
   <p align="center">
-    project_description
-    <br />
-    <a href="https://github.com/github_username/repo_name"><strong>Explore the docs »</strong></a>
+    Synchronize network traffic captures on multiple CPE devices and their associated OVOC servers.
     <br />
     <br />
-    <a href="https://github.com/github_username/repo_name">View Demo</a>
+    <a href="https://github.com/dgrissom55/trafficCapture/issues">Report Bug</a>
     ·
-    <a href="https://github.com/github_username/repo_name/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/github_username/repo_name/issues">Request Feature</a>
+    <a href="https://github.com/dgrissom55/trafficCapture/issues">Request Feature</a>
   </p>
 </div>
 
@@ -85,9 +72,13 @@ Capture network traffic on multiple CPE devices and their associated OVOC server
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
+Here's a blank template to get started: To avoid retyping too much info. Do a search and replace with your text editor for the following: `dgrissom55`, `trafficCapture`, `twitter_handle`, `linkedin_username`, `doug.grissom_client`, `doug.grissom`, `project_title`, `project_description`
 
-Here's a blank template to get started: To avoid retyping too much info. Do a search and replace with your text editor for the following: `github_username`, `repo_name`, `twitter_handle`, `linkedin_username`, `email_client`, `email`, `project_title`, `project_description`
+The goal of this project is to try and isolate with network traffic captures any anomalies that may be preventing certain traffic types from traversing a WAN. With the scripts in this project, the task of automating the synchronization of network captures on numerous audiocodes MSBR CPE devices with their associated OVOC servers, and collecting the captures is handled.
+
+The script `cpe_capture_app.py` is responsible for initiating the `debug capture` commands using REST API calls to the MSBR devices and synchronizing traffic captures on OVOC servers associated with the targeted CPE devices. The script `ovoc_capture_app.py` receives commands from the CPE capture app and initiates the `tcpdump` that is filtered on the targeted CPE devices IP address.
+
+ 
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -127,7 +118,7 @@ This is an example of how to list things you need to use the software and how to
 1. Get a free API Key at [https://example.com](https://example.com)
 2. Clone the repo
    ```sh
-   git clone https://github.com/github_username/repo_name.git
+   git clone https://github.com/dgrissom55/trafficCapture.git
    ```
 3. Install NPM packages
    ```sh
@@ -161,7 +152,7 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 - [ ] Feature 3
     - [ ] Nested Feature
 
-See the [open issues](https://github.com/github_username/repo_name/issues) for a full list of proposed features (and known issues).
+See the [open issues](https://github.com/dgrissom55/trafficCapture/issues) for a full list of proposed features (and known issues).
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -197,9 +188,9 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 <!-- CONTACT -->
 ## Contact
 
-Your Name - [@twitter_handle](https://twitter.com/twitter_handle) - email@email_client.com
+Doug Grissom - doug.grissom@audiocodes.com
 
-Project Link: [https://github.com/github_username/repo_name](https://github.com/github_username/repo_name)
+Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/dgrissom55/trafficCapture)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -218,17 +209,16 @@ Project Link: [https://github.com/github_username/repo_name](https://github.com/
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
-[contributors-shield]: https://img.shields.io/github/contributors/github_username/repo_name.svg?style=for-the-badge
-[contributors-url]: https://github.com/github_username/repo_name/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/github_username/repo_name.svg?style=for-the-badge
-[forks-url]: https://github.com/github_username/repo_name/network/members
-[stars-shield]: https://img.shields.io/github/stars/github_username/repo_name.svg?style=for-the-badge
-[stars-url]: https://github.com/github_username/repo_name/stargazers
-[issues-shield]: https://img.shields.io/github/issues/github_username/repo_name.svg?style=for-the-badge
-[issues-url]: https://github.com/github_username/repo_name/issues
-[license-shield]: https://img.shields.io/github/license/github_username/repo_name.svg?style=for-the-badge
-[license-url]: https://github.com/github_username/repo_name/blob/master/LICENSE.txt
+[contributors-shield]: https://img.shields.io/github/contributors/dgrissom55/trafficCapture.svg?style=for-the-badge
+[contributors-url]: https://github.com/dgrissom55/trafficCapture/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/dgrissom55/trafficCapture.svg?style=for-the-badge
+[forks-url]: https://github.com/dgrissom55/trafficCapture/network/members
+[stars-shield]: https://img.shields.io/github/stars/dgrissom55/trafficCapture.svg?style=for-the-badge
+[stars-url]: https://github.com/dgrissom55/trafficCapture/stargazers
+[issues-shield]: https://img.shields.io/github/issues/dgrissom55/trafficCapture.svg?style=for-the-badge
+[issues-url]: https://github.com/dgrissom55/trafficCapture/issues
+[license-shield]: https://img.shields.io/github/license/dgrissom55/trafficCapture.svg?style=for-the-badge
+[license-url]: https://github.com/dgrissom55/trafficCapture/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
-[product-screenshot]: images/screenshot.png
 
