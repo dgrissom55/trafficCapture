@@ -85,6 +85,8 @@ devices information. The following is an example of what is tracked:
              "state": "active|not active",
              "description": "<some description>",
              "lastCapture": "<last stopped capture filename>",
+             "lastRequest": "<some command request>",
+             "lastResponse": "<some command response>",
              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
              "tasks": [
                  {
@@ -629,6 +631,184 @@ def get_listen_port(logger, log_id):
     return listen_port
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: update_prevent_shutdown                                           #
+#                                                                             #
+# Update the value stored in the 'config.py' file if necessary that defines   #
+# the prevent script shutdown setting.                                        #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger           - File handler for storing logged actions              #
+#     log_id           - Unique identifier for this devices log entries       #
+#     prevent_shutdown - Prevent shutdown entered from interactive input      #
+#                                                                             #
+# Return:                                                                     #
+#    status - Boolean: Success or failure of the update action.               #
+# --------------------------------------------------------------------------- #
+def update_prevent_shutdown(logger, log_id, prevent_shutdown):
+    """Update prevent shutdown setting that is stored in 'config.py' file."""
+
+    status = False
+    do_update = False
+
+    # --------------------------------------------------------- #
+    # Read in current configuration file contents. The contents #
+    # will be modified by REGEX substitutions and written back  #
+    # the the 'config.py' file if differences exist.            #
+    # --------------------------------------------------------- #
+    config_file_contents = ''
+    event = 'Reading contents of "config.py" file.'
+    logger.debug('{} - {}'.format(log_id, event))
+    try:
+        with open('./config.py', 'r') as fp:
+            config_file_contents = fp.read()
+    except Exception as err:
+        event = 'Unable to read "config.py" file - Error: {}'.format(err)
+        logger.error('{} - {}'.format(log_id, event))
+        print('  - ERROR: {}'.format(event))
+
+    else:
+        event = 'Successfully read in "config.py" file.'
+        logger.debug('{} - {}'.format(log_id, event))
+
+        try:
+            # ------------------------------- #
+            # Check 'prevent_shutdown' for changes #
+            # ------------------------------- #
+            if prevent_shutdown != "" and prevent_shutdown != config.prevent_shutdown:
+                result = re.sub("(?s)prevent_shutdown = .*?$", "prevent_shutdown = '" + str(prevent_shutdown) + "'", config_file_contents, 1, re.MULTILINE)
+
+                if result != config_file_contents:
+                    # ------------------------------------------------- #
+                    # Configuration file contents successfully modified #
+                    # ------------------------------------------------- #
+                    config_file_contents = result
+                    do_update = True
+                    event = 'Prevent shutdown setting update successfully prepared.'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  - INFO: {}'.format(event))
+                else:
+                    # -------------------------------------------- #
+                    # Failed to modify configuration file contents #
+                    # -------------------------------------------- #
+                    event = 'Failed to prepare update for prevent shutdown setting!'
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('  - ERROR: {}'.format(event))
+
+            else:
+                # -------------------- #
+                # No updates necessary #
+                # -------------------- #
+                status = True
+
+        except Exception as err:
+            event = 'Processing Error: {}'.format(err)
+            logger.error('{} - {}'.format(log_id, event))
+            print('  - ERROR: {}'.format(event))
+
+        else:
+            # ------------------------------- #
+            # Save configuration file updates #
+            # ------------------------------- #
+            if do_update:
+                try:
+                    with open('./config.py', 'w') as fp:
+                        fp.write(config_file_contents)
+                    status = True
+                    event = 'Successfully updated "config.py" file'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  - INFO: {}'.format(event))
+                except Exception as err:
+                    event = 'Unable to write "config.py" file - Error: {}'.format(err)
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('  - ERROR: {}'.format(event))
+
+    return status
+
+# ---------------------------------------------------------------------------- #
+# FUNCTION: get_prevent_shutdown                                               #
+#                                                                              #
+# Get yes/no flag to prevent the script from shutting down when there are no   #
+# active captures to manage. The yes/no string is returned from this function  #
+# as a boolean True/False value for processing in the rest of script.          #
+#                                                                              #
+# Setting the value to 'y' prevents this script from shutting down and it will #
+# run indefinitely waiting for CPE commands.                                   #
+#                                                                              #
+# Parameters:                                                                  #
+#     logger - File handler for storing logged actions                         #
+#     log_id - Unique identifier for this devices log entries                  #
+#                                                                              #
+# Return:                                                                      #
+#    prevent_shutdown - Boolean: True or False                                 #
+# ---------------------------------------------------------------------------- #
+def get_prevent_shutdown(logger, log_id):
+    """Get yes/no flag to enable or disable the script from shutting down."""
+
+    prevent_shutdown = True
+
+    stored_prevent_shutdown = config.prevent_shutdown
+
+    event = 'Retrieved stored prevent shutdown setting: [{}]'.format(stored_prevent_shutdown)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # ----------------------------------------------------- #
+    # Allow modification of stored prevent shutdown setting #
+    # ----------------------------------------------------- #
+    print('')
+    print(':============================================================:')
+    print(': Setting to control whether or not shut down this script    :')
+    print(': after all active captures have completed. Setting this     :')
+    print(': to "y" prevents the script from shutting down and allows   :')
+    print(': it to run indefinitely waiting for CPE capture commands.   :')
+    print(':============================================================:')
+    this_prevent_shutdown = ''
+    while this_prevent_shutdown == '':
+        this_prevent_shutdown = str(raw_input('Prevent script from shutting down: (y/n) [{}] '.format(stored_prevent_shutdown))).lower().strip()
+
+        if this_prevent_shutdown != '':
+            this_prevent_shutdown = this_prevent_shutdown[0]
+
+        event = 'Entered prevent shutdown setting: [{}]'.format(this_prevent_shutdown)
+        logger.info('{} - {}'.format(log_id, event))
+        if this_prevent_shutdown == '':
+            this_prevent_shutdown = stored_prevent_shutdown
+            if this_prevent_shutdown != '':
+                event = 'Using existing prevent shutdown setting: [{}]'.format(this_prevent_shutdown)
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                event = 'Must enter a prevent shutdown setting for controlling script behavior.'
+                logger.error('{} - {}'.format(log_id, event))
+                print('  - ERROR: {} Try again.'.format(event))
+        else:
+            if this_prevent_shutdown == 'y' or this_prevent_shutdown == 'n':
+                event = 'Modifying prevent shutdown setting to: [{}]'.format(this_prevent_shutdown)
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                event = 'Prevent shutdown setting must be one of the following values: ("y"|"n")'
+                logger.error('{} - {}'.format(log_id, event))
+                print('  - ERROR: {} Try again.'.format(event))
+                this_prevent_shutdown = ''
+
+    event = 'Set prevent script shutdown setting to: [{}]'.format(this_prevent_shutdown)
+    logger.info('{} - {}'.format(log_id, event))
+    print('  - INFO: {}'.format(event))
+
+    # ------------------------------------------------------ #
+    # Check if updates are necessary to the 'config.py' file #
+    # ------------------------------------------------------ #
+    if not update_prevent_shutdown(logger, log_id, this_prevent_shutdown):
+        event = 'Failed to update "config.py" file!'
+        logger.warning('{} - {}'.format(log_id, event))
+        print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
+
+    if this_prevent_shutdown == 'y':
+        prevent_shutdown = True
+    else:
+        prevent_shutdown = False
+
+    return this_prevent_shutdown
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: update_interface_name                                             #
 #                                                                             #
 # Update the value stored in the 'config.py' file if necessary that defines   #
@@ -757,7 +937,7 @@ def get_interface_name(logger, log_id):
     print(':============================================================:')
     this_interface_name = ''
     while this_interface_name == '':
-        this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name)))
+        this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name))).strip()
         event = 'Entered network interface name: [{}]'.format(this_interface_name)
         logger.info('{} - {}'.format(log_id, event))
         if this_interface_name == '':
@@ -1053,7 +1233,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                     rename_capture_task = {}
                     rename_capture_task['status'] = 'Success'
                     rename_capture_task['task'] = 'Rename capture files'
-                    rename_capture_task['description'] = 'Successfully renamed capture files to match CPE capture script!'
+                    rename_capture_task['description'] = 'Successfully renamed capture files to match CPE capture script.'
                     task_timestamp = datetime.now()
                     rename_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                     rename_capture_task['filename'] = filename
@@ -1522,8 +1702,9 @@ def main(argv):
         # Disabled interactively setting 'listen_port'.            #
         # To enable, switch the comments on the following 2 lines. #
         # -------------------------------------------------------- #
-        #listen_port = get_listen_port(logger, log_id)
-        listen_port = config.listen_port
+        listen_port = get_listen_port(logger, log_id)
+        #listen_port = config.listen_port
+        prevent_shutdown = get_prevent_shutdown(logger, log_id)
         interface_name = get_interface_name(logger, log_id)
 
     except KeyboardInterrupt:
@@ -1782,10 +1963,13 @@ def main(argv):
             # ------------------------------------------------- #
             # Check for any CPE devices actively being captured #
             # ------------------------------------------------- #
-            active_captures = 0
-            for device in devices_info['devices']:
-                if device['state'].lower() == 'active':
-                    active_captures += 1
+            if prevent_shutdown:
+                active_captures = 1
+            else:
+                active_captures = 0
+                for device in devices_info['devices']:
+                    if device['state'].lower() == 'active':
+                        active_captures += 1
 
             # ------------------------------------------------ #
             # For debugging - Output 'devices_info' dictionary #
