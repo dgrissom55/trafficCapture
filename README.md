@@ -1,5 +1,4 @@
 # trafficCapture
-Capture network traffic on multiple CPE devices and their associated OVOC servers.
 
 <div id="top"></div>
 
@@ -72,11 +71,11 @@ Capture network traffic on multiple CPE devices and their associated OVOC server
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-Here's a blank template to get started: To avoid retyping too much info. Do a search and replace with your text editor for the following: `dgrissom55`, `trafficCapture`, `twitter_handle`, `linkedin_username`, `doug.grissom_client`, `doug.grissom`, `project_title`, `project_description`
-
 The goal of this project is to try and isolate with network traffic captures any anomalies that may be preventing certain traffic types from traversing a WAN. With the scripts in this project, the task of automating the synchronization of network captures on numerous audiocodes MSBR CPE devices with their associated OVOC servers, and collecting the captures is handled.
 
-The script `cpe_capture_app.py` is responsible for initiating the `debug capture` commands using REST API calls to the MSBR devices and synchronizing traffic captures on OVOC servers associated with the targeted CPE devices. The script `ovoc_capture_app.py` receives commands from the CPE capture app and initiates the `tcpdump` that is filtered on the targeted CPE devices IP address.
+The script `cpe_capture_app.py` is responsible for initiating the `debug capture` commands using REST API calls to the MSBR devices and synchronizing traffic captures on OVOC servers associated with the targeted CPE devices.
+
+The script `ovoc_capture_app.py` receives commands from the CPE capture app and initiates the `tcpdump` that is filtered on the targeted CPE devices IP address.
 
  
 
@@ -221,4 +220,5 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 [license-url]: https://github.com/dgrissom55/trafficCapture/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
+[product-screenshot]: images/capture_flow.png
 
