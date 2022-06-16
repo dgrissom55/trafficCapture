@@ -2,6 +2,11 @@
 #                               GENERAL SETTINGS                              #
 # =========================================================================== #
 
+# -------------- #
+# Script version #
+# -------------- #
+version = '1.0.1'
+
 # ----------------------------------- #
 # Directory to store application logs #
 # ----------------------------------- #
@@ -58,8 +63,11 @@ max_events_per_device = 1
 cpe_devices = [
     {
         "device": "192.168.200.218",
+        "type": "GWSBC",
+        "interfaces": [
+            "eth-lan"
+        ],
         "username": "Admin",
         "ovoc": "192.168.200.252"
     }
 ]
-

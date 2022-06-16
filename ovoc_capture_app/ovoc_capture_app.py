@@ -586,12 +586,11 @@ def get_listen_port(logger, log_id):
     # Allow modification of stored UDP listen port #
     # -------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': UDP port to listen on for incoming CPE capture app command :')
-    print(': requests.                                                  :')
-    print(':                                                            :')
-    print(': NOTE: Entered port should be in the range (1025 - 65535)   :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': UDP port to listen on for incoming CPE capture app command requests.          :')
+    print(':                                                                               :')
+    print(': NOTE: Entered port should be in the range (1025 - 65535)                      :')
+    print(':===============================================================================:')
     got_listen_port = False
     while not got_listen_port:
 
@@ -755,12 +754,12 @@ def get_prevent_shutdown(logger, log_id):
     # Allow modification of stored prevent shutdown setting #
     # ----------------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': Setting to control whether or not shut down this script    :')
-    print(': after all active captures have completed. Setting this     :')
-    print(': to "y" prevents the script from shutting down and allows   :')
-    print(': it to run indefinitely waiting for CPE capture commands.   :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': Setting to control whether or not shut down this script after all active      :')
+    print(': captures have completed. Setting this to "y" prevents the script from         :')
+    print(': shutting down and allows this script to run indefinitely waiting for CPE      :')
+    print(': capture commands.                                                             :')
+    print(':===============================================================================:')
     this_prevent_shutdown = ''
     while this_prevent_shutdown == '':
         this_prevent_shutdown = str(raw_input('Prevent script from shutting down: (y/n) [{}] '.format(stored_prevent_shutdown))).lower().strip()
@@ -932,9 +931,9 @@ def get_interface_name(logger, log_id):
     # Allow modification of stored interface name #
     # ------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': Network interface name to use for CPE traffic captures.    :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': Name of the network interface to use for CPE traffic captures.                :')
+    print(':===============================================================================:')
     this_interface_name = ''
     while this_interface_name == '':
         this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name))).strip()
@@ -1264,8 +1263,9 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                             #     basename-1.pcap                        #
                             #     basename-2.pcap                        #
                             # ------------------------------------------ #
+                            base_name = filename.lstrip('CPE_')
                             base_name = filename.rstrip('.pcap')
-                            local_file = path + base_name + '-' + str(index) + '.pcap'
+                            local_file = path + 'OVOC_' + base_name + '-' + str(index) + '.pcap'
 
                             # ------------------------------------------- #
                             # Rename to match CPE capture script filename #
@@ -1648,7 +1648,7 @@ def main(argv):
     # ------------------ #
     # Set version number #
     # ------------------ #
-    version = '1.0'
+    version = config.version
 
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
@@ -1721,7 +1721,8 @@ def main(argv):
     print('===============================================================================')
     print('                         OVOC NETWORK TRAFFIC CAPTURES')
     print('===============================================================================')
-    print('Start Time : {}'.format(begin_timestamp))
+    print('   Version: {}'.format(version))
+    print('Start Time: {}'.format(begin_timestamp))
     print('-------------------------------------------------------------------------------')
 
     # ------------------------------------------------- #

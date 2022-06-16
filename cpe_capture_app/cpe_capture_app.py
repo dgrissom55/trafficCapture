@@ -381,6 +381,8 @@ def send_cli_script(logger, log_id, script, device, username, password):
     # text file part.                                          #
     # -------------------------------------------------------- #
     file_contents = {'file': ('cli.txt', script)}
+    event = 'REST API CLI Script:\n{}'.format(file_contents)
+    logger.info('{} - {}'.format(log_id, event))
 
     # ---------------- #
     # Set REST API URL #
@@ -607,7 +609,7 @@ def update_cpe_devices(logger, log_id, cpe_devices):
             compare_entered_to_stored = [i for i in cpe_devices if i not in config.cpe_devices]
             compare_stored_to_entered = [i for i in config.cpe_devices if i not in cpe_devices]
             if len(compare_entered_to_stored) != 0 or len(compare_stored_to_entered) != 0:
-                result = re.sub("(?s)cpe_devices = (\[.*?\])", "cpe_devices = " + json.dumps(cpe_devices, indent=4), config_file_contents, 1)
+                result = re.sub("(?s)cpe_devices = (\[.*?\]\n+)", "cpe_devices = " + json.dumps(cpe_devices, indent=4) + "\n", config_file_contents, 1)
 
                 if result != config_file_contents:
                     # ------------------------------------------------- #
@@ -682,6 +684,16 @@ def get_cpe_devices(logger, log_id):
     #     "devices": [                                                    #
     #         {                                                           #
     #             "device": "<device address>",                           #
+    #             "type": "MSBR|GWSBC",                                   #
+    #             "interfaces": [                                         #
+    #                 "cellular-wan",                                     #
+    #                 "fiber-wan",                                        #
+    #                 "xdsl-wan",                                         #
+    #                 "shdsl-wan",                                        #
+    #                 "t1-e1-wan",                                        #
+    #                 "eth-wan",                                          #
+    #                 "eth-lan"                                           #
+    #              ],                                                     #
     #             "username": "<device REST API username>",               #
     #             "password": "<device REST API password>",               #
     #             "ovoc": "<ovoc address>",                               #
@@ -694,9 +706,17 @@ def get_cpe_devices(logger, log_id):
     #         <Next Device>                                               #
     #     ]                                                               #
     # }                                                                   #
+    #                                                                     #
+    # NOTE: Only one interface type ('eth-lan') is allowed on gateway and #
+    #       SBC devices. 
     # ------------------------------------------------------------------- #
     devices_info = {}
     devices_info['devices'] = []
+
+    # ------------------------------------- #
+    # Valid interface lists per device type #
+    # ------------------------------------- #
+    msbr_interface_list = ['cellular-wan', 'fiber-wan', 'xdsl-wan', 'shdsl-wan', 't1-e1-wan', 'eth-wan', 'eth-lan']
 
     # ------------------------------------------------------------ #
     # This list holds the contents of the created list of CPE      #
@@ -707,17 +727,15 @@ def get_cpe_devices(logger, log_id):
     config_cpe_devices = []
 
     print('')
-    print(':=============================================================:')
-    print(': Create a set of CPE devices to target for network traffic   :')
-    print(': captures. Enter the required information to use when        :')
-    print(': connecting to each device.                                  :')
-    print(':                                                             :')
-    print(': NOTE: Previously entered CPE devices are recalled and can   :')
-    print(': be modified if desired.                                     :')
-    print(':                                                             :')
-    print(': To remove a previously stored device, type "delete" for the :')
-    print(': CPE device address.                                         :')
-    print(':=============================================================:')
+    print(':===============================================================================:')
+    print(': Create a set of CPE devices to target for network traffic captures. Enter the :')
+    print(': required information to use when connecting to each device.                   :')
+    print(':                                                                               :')
+    print(': NOTE: Previously entered CPE devices are recalled and can  be modified if     :')
+    print(':       desired.                                                                :')
+    print(':                                                                               :')
+    print(': NOTE: To remove a stored device, type "delete" for the CPE device address.    :')
+    print(':===============================================================================:')
     if len(config.cpe_devices) == 0:
         event = 'No stored CPE devices were found.'
         logger.info('{} - {}'.format(log_id, event))
@@ -736,19 +754,33 @@ def get_cpe_devices(logger, log_id):
             stored_device_address = ''
             if 'device' in config.cpe_devices[stored_device_index]:
                 stored_device_address = config.cpe_devices[stored_device_index]['device']
+                event = 'Retrieved stored CPE device address: [{}]'.format(stored_device_address)
+                logger.info('{} - {}'.format(log_id, event))
+            stored_device_type = ''
+            if 'type' in config.cpe_devices[stored_device_index]:
+                stored_device_type = config.cpe_devices[stored_device_index]['type']
+                event = 'Retrieved stored CPE device type: [{}]'.format(stored_device_type)
+                logger.info('{} - {}'.format(log_id, event))
+            stored_device_interfaces = []
+            if 'interfaces' in config.cpe_devices[stored_device_index]:
+                stored_device_interfaces = config.cpe_devices[stored_device_index]['interfaces']
+                event = 'Retrieved stored CPE device interfaces: [{}]'.format(', '.join(stored_device_interfaces))
+                logger.info('{} - {}'.format(log_id, event))
             stored_device_user = ''
             if 'username' in config.cpe_devices[stored_device_index]:
                 stored_device_user = config.cpe_devices[stored_device_index]['username']
+                event = 'Retrieved stored CPE device username: [{}]'.format(stored_device_user)
+                logger.info('{} - {}'.format(log_id, event))
             stored_ovoc_address = ''
             if 'ovoc' in config.cpe_devices[stored_device_index]:
                 stored_ovoc_address = config.cpe_devices[stored_device_index]['ovoc']
+                event = 'Retrieved stored CPE associated OVOC address: [{}]'.format(stored_ovoc_address)
+                logger.info('{} - {}'.format(log_id, event))
 
-            event = 'Retrieved stored CPE device address: [{}]'.format(stored_device_address)
-            logger.info('{} - {}'.format(log_id, event))
-            event = 'Retrieved stored CPE device username: [{}]'.format(stored_device_user)
-            logger.info('{} - {}'.format(log_id, event))
-            event = 'Retrieved stored CPE associated OVOC address: [{}]'.format(stored_ovoc_address)
-            logger.info('{} - {}'.format(log_id, event))
+            # --------------------------------------------- #
+            # Output CPE device entries are associated with #
+            # --------------------------------------------- #
+            print('CPE device #{}:'.format(used_device_index + 1))
 
             # ------------------------------------------- #
             # Allow modification of stored device address #
@@ -756,7 +788,7 @@ def get_cpe_devices(logger, log_id):
             skip_device = False
             got_address = False
             while not got_address:
-                this_device_address = str(input('CPE device #{} IP address or FQDN: (delete) [{}] '.format(used_device_index + 1, stored_device_address))).strip()
+                this_device_address = str(input('  - IP address or FQDN: (delete) [{}] '.format(stored_device_address))).strip()
                 event = 'Entered CPE device: [{}]'.format(this_device_address)
                 logger.info('{} - {}'.format(log_id, event))
                 if this_device_address == '':
@@ -770,7 +802,7 @@ def get_cpe_devices(logger, log_id):
                     got_address = True
                     event = 'Removed CPE device [{}] from list of targeted devices.'.format(stored_device_address)
                     logger.info('{} - {}'.format(log_id, event))
-                    print('  - INFO: {}'.format(event))
+                    print('    - INFO: {}'.format(event))
 
                 else:
                     # ------------------------------------------------------ #
@@ -784,15 +816,176 @@ def get_cpe_devices(logger, log_id):
                     else:
                         event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for accessing the CPE device.'
                         logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {}'.format(event))
+                        print('    - ERROR: {}'.format(event))
 
             if not skip_device:
+                # ---------------------------------------- #
+                # Allow modification of stored device type #
+                # ---------------------------------------- #
+                this_device_type = ''
+                while this_device_type == '':
+                    this_device_type = str(input('  - Type: (msbr|gwsbc) [{}] '.format(stored_device_type))).strip().upper()
+                    event = 'Entered CPE device type: [{}]'.format(this_device_type)
+                    logger.info('{} - {}'.format(log_id, event))
+                    if this_device_type == '':
+                        this_device_type = stored_device_type
+                        if this_device_type != '':
+                            event = 'Using existing CPE device type: [{}]'.format(this_device_type)
+                            logger.info('{} - {}'.format(log_id, event))
+                        else:
+                            event = 'Must enter a device type for the CPE device.'
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {} Try again.'.format(event))
+                    else:
+                        if this_device_type == 'MSBR' or this_device_type == 'GWSBC':
+                            event = 'Modifying CPE device type to: [{}]'.format(this_device_type)
+                            logger.info('{} - {}'.format(log_id, event))
+                        else:
+                            event = 'Device type must be one of the following values: ("msbr"|"gwsbc")'
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {} Try again.'.format(event))
+                            this_device_type = ''
+
+                # --------------------------------------------------- #
+                # Allow modification of stored device interfaces list #
+                # --------------------------------------------------- #
+                this_device_interfaces = []
+                if this_device_type == 'MSBR':
+                    print('')
+                    print('  MSBR capture interface options:')
+                    print('  :-----------------------------------------------------------------------------:')
+                    print('  : Valid Options: "cellular-wan", "fiber-wan", "xdsl-wan", "shdsl-wan",        :')
+                    print('  :                "t1-e1-wan", "eth-wan", or "eth-lan"                         :')
+                    print('  :                                                                             :')
+                    print('  : NOTE: To remove a stored interface, type "delete" for the entry.            :')
+                    print('  :-----------------------------------------------------------------------------:')
+
+                    # ------------------------- #
+                    # Display stored interfaces #
+                    # ------------------------- #
+                    print('  Stored interfaces: [{}]'.format(', '.join(stored_device_interfaces)))
+
+                    interface_index = 0
+                    for stored_device_interface in stored_device_interfaces:
+                        skip_interface = False
+                        got_interface = False
+                        while not got_interface:
+                            this_device_interface = str(input('  - Capture interface #{}: (delete) [{}] '.format(interface_index + 1, stored_device_interface))).strip().lower()
+
+                            event = 'Entered capture interface #{}: [{}]'.format(interface_index + 1, this_device_interface)
+                            logger.info('{} - {}'.format(log_id, event))
+
+                            if this_device_interface == '':
+
+                                this_device_interface = stored_device_interface
+                                if this_device_interface in msbr_interface_list:
+                                    if this_device_interface not in this_device_interfaces:
+                                        event = 'Using existing capture interface: [{}]'.format(this_device_interface)
+                                        logger.info('{} - {}'.format(log_id, event))
+                                        this_device_interfaces.append(this_device_interface)
+                                        got_interface = True
+                                        interface_index += 1
+                                    else:
+                                        event = 'Interface already in list for capturing traffic.'
+                                        logger.error('{} - {}'.format(log_id, event))
+                                        print('    - ERROR: {} Try again.'.format(event))
+                                else:
+                                    event = 'Capture interface option no longer valid. Must be one of the valid options above.'
+                                    logger.error('{} - {}'.format(log_id, event))
+                                    print('    - ERROR: {} Try again.'.format(event))
+
+                            elif this_device_interface.lower() == 'delete':
+                                skip_interface = True
+                                got_interface = True
+                                event = 'Removed interface [{}] from list to capture.'.format(stored_device_interface)
+                                logger.info('{} - {}'.format(log_id, event))
+                                print('    - INFO: {}'.format(event))
+
+                            else:
+                                # ------------------------------------------- #
+                                # Validate entered is in MSBR interfaces list #
+                                # ------------------------------------------- #
+                                if this_device_interface in msbr_interface_list:
+                                    if this_device_interface not in this_device_interfaces:
+                                        event = 'Modifying capture interface to: [{}]'.format(this_device_interface)
+                                        logger.info('{} - {}'.format(log_id, event))
+                                        this_device_interfaces.append(this_device_interface)
+                                        got_interface = True
+                                        interface_index += 1
+                                    else:
+                                        event = 'Interface already in list for capturing traffic.'
+                                        logger.error('{} - {}'.format(log_id, event))
+                                        print('    - ERROR: {} Try again.'.format(event))
+                                else:
+                                    event = 'Capture interface must be one of the valid options above.'
+                                    logger.error('{} - {}'.format(log_id, event))
+                                    print('    - ERROR: {} Try again.'.format(event))
+                                    this_device_interface = ''
+
+                    if len(this_device_interfaces) != 0:
+                        #print('')
+                        reply = ''
+                        while reply != 'y' and reply != 'n':
+                            reply = str(input('    Add another capture interface: (y/n) [n] ')).lower().strip()
+                            if reply == '':
+                                reply = 'n'
+                            else:
+                                reply = reply[0]
+                    else:
+                        reply = 'y'
+
+                    while reply == 'y':
+
+                        this_device_interface = ''
+                        while this_device_interface == '':
+                            this_device_interface = str(input('  - Capture interface #{}: '.format(interface_index + 1))).strip()
+                            event = 'Entered capture interface #{}: [{}]'.format(interface_index + 1, this_device_interface)
+                            logger.info('{} - {}'.format(log_id, event))
+                            # ------------------------------------------- #
+                            # Validate entered is in MSBR interfaces list #
+                            # ------------------------------------------- #
+                            if this_device_interface in msbr_interface_list:
+                                if this_device_interface not in this_device_interfaces:
+                                    event = 'Adding capture interface: [{}]'.format(this_device_interface)
+                                    logger.info('{} - {}'.format(log_id, event))
+                                    this_device_interfaces.append(this_device_interface)
+                                else:
+                                    event = 'Interface already in list for capturing traffic.'
+                                    logger.error('{} - {}'.format(log_id, event))
+                                    print('    - ERROR: {} Try again.'.format(event))
+                                    this_device_interface = ''
+                            else:
+                                event = 'Capture interface must be one of the valid options above.'
+                                logger.error('{} - {}'.format(log_id, event))
+                                print('    - ERROR: {} Try again.'.format(event))
+                                this_device_interface = ''
+
+                        event = 'Set new capture interface #{} to: [{}]'.format(interface_index + 1, this_device_interface)
+                        logger.info('{} - {}'.format(log_id, event))
+
+                        interface_index += 1
+
+                        #print('')
+                        reply = ''
+                        while reply != 'y' and reply != 'n':
+                            reply = str(input('    Add another capture interface: (y/n) [n] ')).lower().strip()
+                            if reply == '':
+                                reply = 'n'
+                            else:
+                                reply = reply[0]
+
+                else:
+                    # -------------------------------------------------- #
+                    # Only allowed interface for gateway and SBC devices #
+                    # -------------------------------------------------- #
+                    this_device_interfaces = ['eth-lan']
+
                 # -------------------------------------------- #
                 # Allow modification of stored device username #
                 # -------------------------------------------- #
                 this_device_user = ''
                 while this_device_user == '':
-                    this_device_user = str(input('CPE device #{} username: [{}] '.format(used_device_index + 1, stored_device_user))).strip()
+                    this_device_user = str(input('  - Username: [{}] '.format(stored_device_user))).strip()
                     event = 'Entered CPE device username: [{}]'.format(this_device_user)
                     logger.info('{} - {}'.format(log_id, event))
                     if this_device_user == '':
@@ -803,7 +996,7 @@ def get_cpe_devices(logger, log_id):
                         else:
                             event = 'Must enter a username to use for accessing an account on the CPE device.'
                             logger.error('{} - {}'.format(log_id, event))
-                            print('  - ERROR: {} Try again.'.format(event))
+                            print('    - ERROR: {} Try again.'.format(event))
                     else:
                         event = 'Modifying CPE device username to: [{}]'.format(this_device_user)
                         logger.info('{} - {}'.format(log_id, event))
@@ -813,29 +1006,29 @@ def get_cpe_devices(logger, log_id):
                 # ------------------------------ #
                 this_device_pass = ''
                 while this_device_pass == '':
-                    this_device_pass = getpass(prompt='CPE device #{} password: '.format(used_device_index + 1))
-                    this_device_pass_verify = getpass(prompt='Retype password: ')
+                    this_device_pass = getpass(prompt='  - Password: ')
+                    this_device_pass_verify = getpass(prompt='    Confirm password: ')
                     if this_device_pass != this_device_pass_verify:
                         event = 'Entered passwords do NOT match.'
                         logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {} Try again.'.format(event))
+                        print('    - ERROR: {} Try again.'.format(event))
                         this_device_pass = ''
                     else:
                         if this_device_pass == '':
                             event = 'Passwords can not be empty!'
                             logger.error('{} - {}'.format(log_id, event))
-                            print('  - ERROR: {} Try again.'.format(event))
+                            print('    - ERROR: {} Try again.'.format(event))
                         else:
                             event = 'Entered passwords match!'
                             logger.info('{} - {}'.format(log_id, event))
-                            print('  - INFO: {}'.format(event))
+                            print('    - INFO: {}'.format(event))
 
                 # --------------------------- #
                 # Get associated OVOC address #
                 # --------------------------- #
                 got_address = False
                 while not got_address:
-                    this_ovoc_address = str(input('CPE device #{} associated OVOC IP address or FQDN: [{}] '.format(used_device_index + 1, stored_ovoc_address))).strip()
+                    this_ovoc_address = str(input('  - Associated OVOC IP address or FQDN: [{}] '.format(stored_ovoc_address))).strip()
                     event = 'Entered CPE associated OVOC: [{}]'.format(this_ovoc_address)
                     logger.info('{} - {}'.format(log_id, event))
                     if this_ovoc_address == '':
@@ -855,7 +1048,7 @@ def get_cpe_devices(logger, log_id):
                         else:
                             event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for the CPE associated OVOC address.'
                             logger.error('{} - {}'.format(log_id, event))
-                            print('  - ERROR: {}'.format(event))
+                            print('    - ERROR: {}'.format(event))
 
                 used_device_index += 1
 
@@ -865,6 +1058,8 @@ def get_cpe_devices(logger, log_id):
                 devices_info['devices'].append({})
                 device_index = len(devices_info['devices']) - 1
                 devices_info['devices'][device_index]['device'] = this_device_address
+                devices_info['devices'][device_index]['type'] = this_device_type
+                devices_info['devices'][device_index]['interfaces'] = this_device_interfaces
                 devices_info['devices'][device_index]['username'] = this_device_user
                 devices_info['devices'][device_index]['password'] = this_device_pass
                 devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
@@ -892,6 +1087,8 @@ def get_cpe_devices(logger, log_id):
                 config_cpe_devices.append({})
                 device_index = len(devices_info['devices']) - 1
                 config_cpe_devices[device_index]['device'] = this_device_address
+                config_cpe_devices[device_index]['type'] = this_device_type
+                config_cpe_devices[device_index]['interfaces'] = this_device_interfaces
                 config_cpe_devices[device_index]['username'] = this_device_user
                 config_cpe_devices[device_index]['ovoc'] = this_ovoc_address
 
@@ -902,17 +1099,29 @@ def get_cpe_devices(logger, log_id):
         # ------------------------------ #
         if len(devices_info['devices']) != 0:
             print('')
-            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
-            if reply == '':
-                reply = 'n'
+            reply = ''
+            while reply != 'y' and reply != 'n':
+                reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
+                if reply == '':
+                    reply = 'n'
+                else:
+                    reply = reply[0]
         else:
             reply = 'y'
 
-        while reply[0] == 'y':
+        while reply == 'y':
 
+            # --------------------------------------------- #
+            # Output CPE device entries are associated with #
+            # --------------------------------------------- #
+            print('CPE device #{}:'.format(used_device_index + 1))
+
+            # ---------------------------- #
+            # Enter new CPE device address #
+            # ---------------------------- #
             this_device_address = ''
             while this_device_address == '':
-                this_device_address = str(input('CPE device #{} IP address or FQDN: '.format(used_device_index + 1))).strip()
+                this_device_address = str(input('  - IP address or FQDN: ')).strip()
                 event = 'Entered CPE device: [{}]'.format(this_device_address)
                 logger.info('{} - {}'.format(log_id, event))
                 # ------------------------------------------------------ #
@@ -922,50 +1131,141 @@ def get_cpe_devices(logger, log_id):
                 if not valid_address:
                     event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for accessing the CPE device.'
                     logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
+                    print('    - ERROR: {}'.format(event))
                     this_device_address = ''
 
             event = 'Set new CPE device address to: [{}]'.format(this_device_address)
             logger.info('{} - {}'.format(log_id, event))
 
+            # ------------------------- #
+            # Enter new CPE device type #
+            # ------------------------- #
+            this_device_type = ''
+            while this_device_type == '':
+                this_device_type = str(input('  - Type: (msbr|gwsbc) ')).strip().upper()
+                event = 'Entered CPE device type: [{}]'.format(this_device_address)
+                logger.info('{} - {}'.format(log_id, event))
+                if this_device_type == '':
+                    event = 'Must enter a device type for the CPE device.'
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+            event = 'Set new CPE device type to: [{}]'.format(this_device_type)
+            logger.info('{} - {}'.format(log_id, event))
+
+            # ----------------------------------------------------- #
+            # Enter new CPE capture interfaces if device is an MSBR #
+            # ----------------------------------------------------- #
+            if this_device_type == 'MSBR':
+
+                print('')
+                print('  MSBR capture interface options:')
+                print('  :-----------------------------------------------------------------------------:')
+                print('  : Valid Options: "cellular-wan", "fiber-wan", "xdsl-wan", "shdsl-wan",        :')
+                print('  :                "t1-e1-wan", "eth-wan", or "eth-lan"                         :')
+                print('  :                                                                             :')
+                print('  : NOTE: To remove a stored interface, type "delete" for the entry.            :')
+                print('  :-----------------------------------------------------------------------------:')
+
+                interface_index = 0
+                reply = 'y'
+
+                while reply == 'y':
+
+                    this_device_interface = ''
+                    while this_device_interface == '':
+                        this_device_interface = str(input('  - Capture interface #{}: '.format(interface_index + 1))).strip()
+                        event = 'Entered capture interface #{}: [{}]'.format(interface_index + 1, this_device_interface)
+                        logger.info('{} - {}'.format(log_id, event))
+                        # ------------------------------------------- #
+                        # Validate entered is in MSBR interfaces list #
+                        # ------------------------------------------- #
+                        if this_device_interface in msbr_interface_list:
+                            if this_device_interface not in this_device_interfaces:
+                                event = 'Adding capture interface: [{}]'.format(this_device_interface)
+                                logger.info('{} - {}'.format(log_id, event))
+                                this_device_interfaces.append(this_device_interface)
+                            else:
+                                event = 'Interface already in list for capturing traffic.'
+                                logger.error('{} - {}'.format(log_id, event))
+                                print('    - ERROR: {} Try again.'.format(event))
+                                this_device_interface = ''
+                        else:
+                            event = 'Capture interface must be one of the valid options above.'
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {} Try again.'.format(event))
+                            this_device_interface = ''
+
+                    event = 'Set new capture interface #{} to: [{}]'.format(interface_index + 1, this_device_interface)
+                    logger.info('{} - {}'.format(log_id, event))
+
+                    interface_index += 1
+
+                    #print('')
+                    reply = ''
+                    while reply != 'y' and reply != 'n':
+                        reply = str(input('    Add another capture interface: (y/n) [n] ')).lower().strip()
+                        if reply == '':
+                            reply = 'n'
+                        else:
+                            reply = reply[0]
+
+            else:
+                # -------------------------------------------------- #
+                # Only allowed interface for gateway and SBC devices #
+                # -------------------------------------------------- #
+                this_device_interfaces = ['eth-lan']
+                event = 'Set new capture interface to: [eth-lan]'
+                logger.info('{} - {}'.format(log_id, event))
+
+            # ----------------------------- #
+            # Enter new CPE device username #
+            # ----------------------------- #
             this_device_user = ''
             while this_device_user == '':
-                this_device_user = str(input('CPE device #{} username: '.format(used_device_index + 1))).strip()
+                this_device_user = str(input('  - Username: ')).strip()
                 event = 'Entered CPE device username: [{}]'.format(this_device_address)
                 logger.info('{} - {}'.format(log_id, event))
-                if this_device_user == '':
-                    event = 'Must enter a username to use for accessing an account on the CPE device.'
+                if this_device_type != 'MSBR' or this_device_type != 'GWSBC':
+                    event = 'Device type must be one of the following values: ("msbr"|"gwsbc")'
                     logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
+                    print('    - ERROR: {} Try again.'.format(event))
+                    this_interface_name = ''
 
             event = 'Set new CPE device username to: [{}]'.format(this_device_user)
             logger.info('{} - {}'.format(log_id, event))
 
+            # ----------------------------- #
+            # Enter new CPE device password #
+            # ----------------------------- #
             this_device_pass = ''
             while this_device_pass == '':
-                this_device_pass = getpass(prompt='CPE device #{} password: '.format(used_device_index + 1))
-                this_device_pass_verify = getpass(prompt='Retype password: ')
+                this_device_pass = getpass(prompt='  - Password: ')
+                this_device_pass_verify = getpass(prompt='    Confirm password: ')
                 if this_device_pass != this_device_pass_verify:
                     event = 'Entered passwords to NOT match.'
                     logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {} Try again.'.format(event))
+                    print('    - ERROR: {} Try again.'.format(event))
                     this_device_pass = ''
                 else:
                     if this_device_pass == '':
                         event = 'Passwords can not be empty!'
                         logger.error('{} - {}'.format(log_id, event))
-                        print('  - ERROR: {} Try again.'.format(event))
+                        print('    - ERROR: {} Try again.'.format(event))
                     else:
                         event = 'Entered passwords match!'
                         logger.info('{} - {}'.format(log_id, event))
-                        print('  - INFO: {}'.format(event))
+                        print('    - INFO: {}'.format(event))
 
             event = 'Set CPE device password.'
             logger.info('{} - {}'.format(log_id, event))
 
+            # ------------------------------------ #
+            # Enter new CPE device associated OVOC #
+            # ------------------------------------ #
             this_ovoc_address = ''
             while this_ovoc_address == '':
-                this_device_address = str(input('CPE device #{} associated OVOC IP address or FQDN: '.format(used_device_index + 1))).strip()
+                this_device_address = str(input('  - Associated OVOC IP address or FQDN: ')).strip()
                 event = 'Entered CPE associated OVOC: [{}]'.format(this_ovoc_address)
                 logger.info('{} - {}'.format(log_id, event))
                 # ------------------------------------------------------ #
@@ -975,7 +1275,7 @@ def get_cpe_devices(logger, log_id):
                 if not valid_address:
                     event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for the CPE associated OVOC address.'
                     logger.error('{} - {}'.format(log_id, event))
-                    print('  - ERROR: {}'.format(event))
+                    print('    - ERROR: {}'.format(event))
                     this_device_address = ''
 
             event = 'Set new CPE device address to: [{}]'.format(this_device_address)
@@ -987,6 +1287,8 @@ def get_cpe_devices(logger, log_id):
             devices_info['devices'].append({})
             device_index = len(devices_info['devices']) - 1
             devices_info['devices'][device_index]['device'] = this_device_address
+            devices_info['devices'][device_index]['type'] = this_device_type
+            devices_info['devices'][device_index]['interfaces'] = this_device_interfaces
             devices_info['devices'][device_index]['username'] = this_device_user
             devices_info['devices'][device_index]['password'] = this_device_pass
             devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
@@ -1014,13 +1316,21 @@ def get_cpe_devices(logger, log_id):
             config_cpe_devices.append({})
             device_index = len(devices_info['devices']) - 1
             config_cpe_devices[device_index]['device'] = this_device_address
+            config_cpe_devices[device_index]['type'] = this_device_type
+            config_cpe_devices[device_index]['interfaces'] = this_device_interfaces
             config_cpe_devices[device_index]['username'] = this_device_user
             config_cpe_devices[device_index]['ovoc'] = this_ovoc_address
 
             used_device_index += 1
 
             print('')
-            reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
+            reply = ''
+            while reply != 'y' and reply != 'n':
+                reply = str(input('Add another targeted CPE device: (y/n) [n] ')).lower().strip()
+                if reply == '':
+                    reply = 'n'
+                else:
+                    reply = reply[0]
 
         if len(devices_info['devices']) == 0:
             event = 'Must enter at least one CPE device to target for the network traffic capture.'
@@ -1163,12 +1473,12 @@ def get_listen_port(logger, log_id):
     # Allow modification of stored UDP listen port #
     # -------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': UDP port to listen on for incoming alarms forwarded by an  :')
-    print(': OVOC server. Alarms are expected to be in SYSLOG format.   :')
-    print(':                                                            :')
-    print(': NOTE: Entered port should be in the range (1025 - 65535)   :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': UDP port to listen on for incoming alarms forwarded by an OVOC server. Alarms :')
+    print(': are expected to be in SYSLOG format.                                          :')
+    print(':                                                                               :')
+    print(': NOTE: Entered port should be in the range (1025 - 65535)                      :')
+    print(':===============================================================================:')
     got_listen_port = False
     while not got_listen_port:
 
@@ -1329,12 +1639,12 @@ def get_max_retries(logger, log_id):
     # Allow modification of stored REST API retry attempts #
     # ---------------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': Maximum number of REST API retry attempts allowed when     :')
-    print(': sending requests to CPE devices.                           :')
-    print(':                                                            :')
-    print(': NOTE: Entered value should be in the range (1 - 100)       :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': Maximum number of REST API retry attempts allowed when  sending requests to   :')
+    print(': CPE devices.                                                                  :')
+    print(':                                                                               :')
+    print(': NOTE: Entered value should be in the range (1 - 100)                          :')
+    print(':===============================================================================:')
     got_max_retries = False
     while not got_max_retries:
 
@@ -1499,19 +1809,17 @@ def get_max_events_per_device(logger, log_id):
     # Allow modification of stored REST API retry attempts #
     # ---------------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': Maximum number of OVOC alarm events that can be received   :')
-    print(': per device that trigger the retrieval of the network       :')
-    print(': capture from a CPE device.                                 :')
-    print(':                                                            :')
-    print(': If the triggering events counter is less than the value,   :')
-    print(': then the network traffic capture is restarted on the CPE   :')
-    print(': device.                                                    :')
-    print(':                                                            :')
-    print(': NOTE: Currently triggering on "Connection Lost" alarm.     :')
-    print(':                                                            :')
-    print(': NOTE: Entered value should be in the range (1 - 50)        :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': Maximum number of OVOC alarm events that can be received per device that      :')
+    print(': trigger the retrieval of the network capture from a CPE device.               :')
+    print(':                                                                               :')
+    print(': If the triggering events counter is less than the value, then the network     :')
+    print(': traffic capture is restarted on the CPE device.                               :')
+    print(':                                                                               :')
+    print(': NOTE: Currently triggering on "Connection Lost" alarm.                        :')
+    print(':                                                                               :')
+    print(': NOTE: Entered value should be in the range (1 - 50)                           :')
+    print(':===============================================================================:')
     got_max_events_per_device = False
     while not got_max_events_per_device:
 
@@ -1606,11 +1914,18 @@ def start_capture(logger, log_id, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                cli_script = """
+                if devices_info['devices'][device_index]['type'] == 'MSBR':
+                    cli_script = """
 debug capture data physical stop
 debug capture data physical eth-wan
 debug capture data physical start
-                """
+                    """
+                else:
+                    cli_script = """
+debug capture voip physical stop
+debug capture voip physical eth-lan
+debug capture voip physical start
+                    """
                 start_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                 # ---------------------- #
@@ -1649,9 +1964,14 @@ debug capture data physical start
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
 
-                    cli_script = """
+                    if devices_info['devices'][device_index]['type'] == 'MSBR':
+                        cli_script = """
 debug capture data physical show
-                    """
+                        """
+                    else:
+                        cli_script = """
+debug capture voip physical show
+                        """
                     verify_started_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                     # --------------- #
@@ -1775,9 +2095,14 @@ def stop_capture(logger, log_id, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                cli_script = """
+                if devices_info['devices'][device_index]['type'] == 'MSBR':
+                    cli_script = """
 debug capture data physical stop
-                """
+                    """
+                else:
+                    cli_script = """
+debug capture voip physical stop
+                    """
                 stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                 # ---------------------- #
@@ -1816,9 +2141,14 @@ debug capture data physical stop
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
 
-                    cli_script = """
+                    if devices_info['devices'][device_index]['type'] == 'MSBR':
+                        cli_script = """
 debug capture data physical show
-                    """
+                        """
+                    else:
+                        cli_script = """
+debug capture voip physical show
+                        """
                     verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                     # --------------- #
@@ -1973,6 +2303,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                         file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
                         filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
                         filename = re.sub(':', '.', filename)
+                        filename = 'CPE_' + filename
                         retrieve_capture_task['filename'] = filename
 
                         remote_file = '/debug-capture/debug-capture-data.pcap'
@@ -2349,7 +2680,7 @@ def main(argv):
     # ------------------ #
     # Set version number #
     # ------------------ #
-    version = '1.0'
+    version = config.version
 
     # ----------------------------- #
     # Prepare captures subdirectory #
@@ -2390,7 +2721,8 @@ def main(argv):
     print('===============================================================================')
     print('                         CPE NETWORK TRAFFIC CAPTURES')
     print('===============================================================================')
-    print('Start Time :', begin_timestamp)
+    print('   Version:'.format(version))
+    print('Start Time:'.format(begin_timestamp))
     print('-------------------------------------------------------------------------------')
 
     # --------------------------------------------- #
@@ -2683,7 +3015,7 @@ def main(argv):
     print('===============================================================================')
     print('                              PROCESSING SUMMARY')
     print('===============================================================================')
-    print('Completed:', end_timestamp)
+    print('Completed:'.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
 
