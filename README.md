@@ -14,6 +14,7 @@
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
+
 ![Last Commit][last-commit-shield]
 ![Repo Size][repo-size-shield]
 
@@ -47,9 +48,6 @@
   <ol>
     <li>
       <a href="#about-the-project">About The Project</a>
-      <ul>
-        <li><a href="#built-with">Built With</a></li>
-      </ul>
     </li>
     <li>
       <a href="#getting-started">Getting Started</a>
@@ -60,10 +58,7 @@
     </li>
     <li><a href="#usage">Usage</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgments">Acknowledgments</a></li>
   </ol>
 </details>
 
@@ -76,26 +71,128 @@
 
 The goal of this project is to try and isolate with network traffic captures any anomalies that may be preventing certain traffic types from traversing a WAN. With the scripts in this project, the task of automating the synchronization of network captures on numerous audiocodes MSBR CPE devices with their associated OVOC servers, and collecting the captures is handled.
 
-The script `cpe_capture_app.py` is responsible for initiating the `debug capture` commands using REST API calls to the MSBR devices and synchronizing traffic captures on OVOC servers associated with the targeted CPE devices.
+There are a mimimum of two scripts that will be required to be run. The following is a high level description of each scripts functions:
 
-The script `ovoc_capture_app.py` receives commands from the CPE capture app and initiates the `tcpdump` that is filtered on the targeted CPE devices IP address.
+* `cpe_capture_app.py`
 
+  This script should be run on a separate host server, as depicted in the diagram above, that will have separate network connectivity to access both the CPE devices and the OVOC servers and also the ability to have additional Python modules installed like 'requests', 'paramiko', etc. This script DOES NOT have to be run with 'root' privileges.
+                         
+  This script is responsible for initiating the `debug capture` commands using REST API calls to the MSBR devices and sending UDP command request messages to synchronize `tcpdump` traffic captures on OVOC servers associated with the targeted CPE devices.
+
+* `ovoc_capture_app.py`
+
+  This script should be run on each OVOC server, as depicted in the diagram above, that is associated with a CPE device being targeted for network traffic captures. This script MUST BE run with 'root' privileges since it will issue system calls to start the linux 'tcpdump' application.
+  
+  This script receives the UDP command request messages from the CPE capture app and initiates the `tcpdump` that filters captured traffic based on the targeted CPE devices IP address.
+
+<b>Detailed Descriptions:</b>
+
+Running the 'cpe_capture_app.py' script on a separate server other than an OVOC server is required since the goal is to understand why an OVOC server may be losing connectivity with the CPE devices. The intent is that the separate server will not have any loss of connectivity to the CPE device and will be able to remain in communications with the CPE to issue REST API commands to control and retrieve debug captures without failure.
+
+The goal is the attempt catch an event where SNMP traffic is not being seen on the CPE device and it loses management connectivity with the OVOC server.
+
+A major part of the interactive input to the CPE capture script (`cpe_capture_app.py`) is the creation of a list of CPE devices and their associated OVOC servers. The commands to start/stop the debug capture on the audiocodes CPE is sent via REST API to the devices defined from the interactive entries. The traffic captures on the CPE's associated OVOC servers are started and stopped using UDP signaling. Commands are sent from the CPE capture script to the `listen_port` defined for the complementatry OVOC capture Python script (`ovoc_capture_app.py`) running on the appropriate OVOC servers.
+
+On the OVOC servers, the network captures are performed by issuing system calls to the `tcpdump` app. To start a capture on the OVOC server, the CPE capture script sends a `CAPTURE` command to the appropriate OVOC server to inform it which CPE traffic should be captured. The OVOC capture script responds with a `TRYING` when setting up the tcpdump, and then an `OK` response when the tcpdump process is running. The response will be `FAIL` if the capture fails to be started on the OVOC server.
+
+The captures on both the CPE device and the OVOC server are stopped after the `cpe_capture_app.py` script receives the `Connection Lost` SNMP alarm. Each OVOC server in this version of the project must be manually configured with a SNMP forwarding rule to send any received `Connection Lost` alarms to the CPE capture script.
+<p>
+  (<a href="#ovoc">See the OVOC server prerequisites below.</a>)
+</p>
+
+The alarm forwarded from the OVOC servers should be in `SYSLOG` format so that the `cpe_capture_app.py` script can properly parse the contents of the alarm. This SNMP alarm forwarding rule will be automatically created in the appropriate OVOC servers in future releases. Once the alarm has been processed, the CPE capture script will send a `STOP` message to the OVOC server to trigger it to kill the tcpdump process for that CPE device. The `STOP` message also contains the filename of the PCAP capture file retrieved from an SFTP transfer of a stopped CPE `debug capture`. The OVOC server renameds its `tcpdump` files to match the filename of the CPE device for easier correlation.
+
+The following messages are exchanged:
+
+  ```sh
+CPE capture script                         OVOC capture server
+       |                                           |
+       |-------- CAPTURE <device address> -------->|
+       |                                           |
+       |<-------- TRYING <device address> ---------|
+       |                                           |
+       |<------- OK | FAIL <device address> -------|
+       |                                           |
+       |---- STOP <device address> <filename> ---->|
+       |                                           |
+       |<-------- TRYING <device address> ---------|
+       |                                           |
+       |<------- OK | FAIL <device address> -------|
+       |                                           |
+  ```
+
+The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
+
+  ```sh
+ {
+     "devices": [
+         {
+             "device": "<device ip address>",
+             "username": "<device REST API username>",
+             "password": "<device REST API password>",
+             "status": "Success|Failure",
+             "state": "active|not active",
+             "events": "Success|Failure",
+             "ovocState": "active|not active",
+             "description": "<some description>",
+             "lastRequest": "<some command request>",
+             "lastResponse": "<some command response>",
+             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+             "tasks": [
+                 {
+                     "task": "<task name>",
+                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
+                     "status": "Success|Failure",
+                     "statusCode": <http response status code>,
+                     "output": "<CLI script execution>",
+                     "description": "<CLI script load status>",
+                 },
+                 ...
+                 <Next Task>
+             ]
+         },
+         ...
+         <Next Device>
+     ]
+ }
  
+ For a 'Stop capture' task, the following item is added to the task items:
+                     "filename": "<capture filename>",
+  ```
 
-<p align="right">(<a href="#top">back to top</a>)</p>
+The OVOC capture script `ovoc_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
 
-
-
-### Built With
-
-* [Next.js](https://nextjs.org/)
-* [React.js](https://reactjs.org/)
-* [Vue.js](https://vuejs.org/)
-* [Angular](https://angular.io/)
-* [Svelte](https://svelte.dev/)
-* [Laravel](https://laravel.com)
-* [Bootstrap](https://getbootstrap.com)
-* [JQuery](https://jquery.com)
+  ```sh
+ {
+     "devices": [
+         {
+             "device": "<device ip address>",
+             "status": "Success|Failure",
+             "state": "active|not active",
+             "description": "<some description>",
+             "lastCapture": "<last stopped capture filename>",
+             "lastRequest": "<some command request>",
+             "lastResponse": "<some command response>",
+             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+             "tasks": [
+                 {
+                     "task": "<task name>",
+                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
+                     "status": "Success|Failure",
+                     "description": "<status information>",
+                 },
+                 ...
+                 <Next Task>
+             ]
+         },
+         ...
+         <Next Device>
+     ]
+ }
+ 
+ For a 'Stop capture' task, the following item is added to the task items:
+                     "filename": "<capture filename>",
+  ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -104,32 +201,73 @@ The script `ovoc_capture_app.py` receives commands from the CPE capture app and 
 <!-- GETTING STARTED -->
 ## Getting Started
 
-This is an example of how you may give instructions on setting up your project locally.
-To get a local copy up and running follow these simple example steps.
 
 ### Prerequisites
 
-This is an example of how to list things you need to use the software and how to install them.
-* npm
+This is a list of of requirements for the scripts, the additional modules needed, how to install them.
+
+On the servers hosting the CPE capture script: `cpe_capture_app.py`
+* Python 3.6+
+* Module `requests` for sending REST API requests to the CPE devices.
+
+  <b>NOTE:</b> CPE devices will need to allow access to TCP port 443.
   ```sh
-  npm install npm@latest -g
+  pip3 install requests
   ```
+* Module `urllib3` for underlying HTTP/S transport.
+  ```sh
+  pip3 install urllib3
+  ```
+* Module `pathlib` for managment of logs and capture directories.
+  ```sh
+  pip3 install pathlib
+  ```
+* Module `paramiko` for SFTP transfers of capture files from the CPE devices.
+
+  <b>NOTE:</b> CPE devices will need to allow access to TCP port 22.
+  ```sh
+  pip3 install requests
+  ```
+<br>
+
+On the OVOC servers hosting the capture script: `ovoc_capture_app.py`
+* No prerequisites
+<br>
+
+<div id="ovoc"></div>
+
+OVOC Server:
+* SNMP alarms must be manually configured to foward to the CPE capture script:
+
+<img src="images/alarm_fwd_select_devices.png" height="639"> <img src="images/alarm_fwd_select_alarm.png" height="639"> <img src="images/alarm_fwd_set_type_and_destination.png" height="639">
+
+
+<br>
+
 
 ### Installation
 
-1. Get a free API Key at [https://example.com](https://example.com)
-2. Clone the repo
-   ```sh
-   git clone https://github.com/dgrissom55/trafficCapture.git
-   ```
-3. Install NPM packages
-   ```sh
-   npm install
-   ```
-4. Enter your API in `config.js`
-   ```js
-   const API_KEY = 'ENTER YOUR API';
-   ```
+<b>NOTE:</b> The `ovoc_capture_app.py` script should be running prior to starting the `cpe_capture_app.py` script(s).
+
+<br>
+
+On OVOC servers:
+1. Upload the `ovoc_capture_app` directory to each OVOC server that is used for managing any of the targeted CPE devices.
+2. Access each OVOC server using SSH and navigate to the uploaded `ovoc_capture_app` directory.
+3. Run the following command:
+      
+        python ovoc_capture_app.py
+<br>
+
+
+On the servers hosting the CPE capture script:
+1. Upload the `cpe_capture_app` directory to a different server in the network that has access to communicate to both the CPE devices and to each OVOC server used.
+2. Access the server hosting the CPE capture script using SSH or command line and navigate to the uploaded `cpe_capture_app` directory.
+3. Run the following command:
+      
+        python3 cpe_capture_app.py
+<br>
+
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -138,9 +276,8 @@ This is an example of how to list things you need to use the software and how to
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources.
-
-_For more examples, please refer to the [Documentation](https://example.com)_
+1. Run `ovoc_capture_app.py` on OVOC server managing a targeted CPE device.
+2. Run `cpe_capture_app.py` on server that has access to both the CPE device and also the associated OVOC server.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -149,42 +286,14 @@ _For more examples, please refer to the [Documentation](https://example.com)_
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Feature 1
-- [ ] Feature 2
-- [ ] Feature 3
-    - [ ] Nested Feature
+- [ ] Add support for capturing traffic on Mediant Gateway and SBC devices.
+- [ ] Add automate creation of SNMP forwarding rules to the `ovoc_capture_app.py` script.
 
-See the [open issues](https://github.com/dgrissom55/trafficCapture/issues) for a full list of proposed features (and known issues).
+     * When a `CAPTURE` request is received by the OVOC capture script, if a SNMP fowarding rule doesn't already exist for the CPE capture script that sent the request, then a new rule will be added.
+- [ ] Create CSV file that has records for each device and details every event and task performed against it.
+
 
 <p align="right">(<a href="#top">back to top</a>)</p>
-
-
-
-<!-- CONTRIBUTING -->
-## Contributing
-
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
-
-
-<!-- LICENSE -->
-## License
-
-Distributed under the MIT License. See `LICENSE.txt` for more information.
-
-<p align="right">(<a href="#top">back to top</a>)</p>
-
 
 
 <!-- CONTACT -->
@@ -196,16 +305,6 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-* []()
-* []()
-* []()
-
-<p align="right">(<a href="#top">back to top</a>)</p>
 
 
 
@@ -224,5 +323,8 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
 [product-screenshot]: images/capturing_flow_v1.0.0.png
+[select-devices-screenshot]: images/alarm_fwd_select_devices.png
+[select-alarms-screenshot]: images/alarm_fwd_select_alarm.png
+[select-destination-screenshot]: images/alarm_fwd_set_type_and_destination.png
 [last-commit-shield]: https://img.shields.io/github/last-commit/dgrissom55/trafficCapture?style=for-the-badge
 [repo-size-shield]: https://img.shields.io/github/repo-size/dgrissom55/trafficCapture?style=for-the-badge
