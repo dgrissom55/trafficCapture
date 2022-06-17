@@ -1462,69 +1462,6 @@ def parse_message(logger, log_id, message):
     return msg_info
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: get_device_index                                                  #
-#                                                                             #
-# Search for target device in records of 'devices_info' dictionary and return #
-# the index if found and if not found create a new record and return the new  #
-# record index.                                                               #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger        - File handler for storing logged actions                 #
-#     log_id        - Unique identifier for this devices log entries          #
-#     target_device - Target device to locate in 'devices_info' dictionary    #
-#     devices_info  - Dictionary of targeted devices                          #
-#                                                                             #
-# Return:                                                                     #
-#    device_index - Index of device record in 'devices_info' dictionary       #
-# --------------------------------------------------------------------------- #
-def get_device_index(logger, log_id, target_device, devices_info):
-    """Return the index of the device record in the 'devices_info' dictionary."""
-
-    device_index = -1
-
-    # ---------------------------------------------- #
-    # Search for device in 'devices_info' dictionary #
-    # ---------------------------------------------- #
-    device_found = False
-    index = 0
-    for device in devices_info['devices']:
-        if device['device'] == target_device:
-            device_found = True
-            device_index = index
-
-            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
-            logger.debug('{} - {}'.format(log_id, event))
-
-        index += 1
-
-    # ----------------------------------- #
-    # If not found, add new device record #
-    # ----------------------------------- #
-    if not device_found:
-
-        # ------------------------ #
-        # Create CPE device record #
-        # ------------------------ #
-        devices_info['devices'].append({})
-        device_index = len(devices_info['devices']) - 1
-        devices_info['devices'][device_index]['device'] = target_device
-        devices_info['devices'][device_index]['tasks'] = []
-
-        # ----------------------------------------------------- #
-        # Default the state to 'not active' to indicate the     #
-        # device is currently not performing a network capture. #
-        # ---------------------------------------------------- #
-        devices_info['devices'][device_index]['state'] = 'not active'
-
-        event = 'Created new CPE record for device: [{}]'.format(target_device)
-        logger.info('{} - {}'.format(log_id, event))
-
-        event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
-        logger.debug('{} - {}'.format(log_id, event))
-
-    return device_index
-
-# --------------------------------------------------------------------------- #
 # FUNCTION: create_csv_file                                                   #
 #                                                                             #
 # Extract the configuration files stored in the ZIP file that match the file  #
@@ -1804,10 +1741,9 @@ def main(argv):
     begin_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
     print('===============================================================================')
-    #print('                         OVOC NETWORK TRAFFIC CAPTURES')
-    print(' Version: {:10s}    OVOC NETWORK TRAFFIC CAPTURES'.format(version))
+    print('                         OVOC NETWORK TRAFFIC CAPTURES')
     print('===============================================================================')
-    #print('   Version: {}'.format(version))
+    print('   Version: {}'.format(version))
     print('Start Time: {}'.format(begin_timestamp))
     print('-------------------------------------------------------------------------------')
 
@@ -1863,10 +1799,46 @@ def main(argv):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                # ------------------------------------------------- #
-                # Get index for device in 'devices_info' dictionary #
-                # ------------------------------------------------- #
-                device_index = get_device_index(logger, log_id, target_device, devices_info)
+                # ---------------------------------------------- #
+                # Search for device in 'devices_info' dictionary #
+                # ---------------------------------------------- #
+                device_found = False
+                device_index = -1
+                index = 0
+                for device in devices_info['devices']:
+                    if device['device'] == target_device:
+                        device_found = True
+                        device_index = index
+
+                        event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+                        logger.debug('{} - {}'.format(log_id, event))
+
+                    index += 1
+
+                # ----------------------------------- #
+                # If not found, add new device record #
+                # ----------------------------------- #
+                if not device_found:
+
+                    # ------------------------ #
+                    # Create CPE device record #
+                    # ------------------------ #
+                    devices_info['devices'].append({})
+                    device_index = len(devices_info['devices']) - 1
+                    devices_info['devices'][device_index]['device'] = target_device
+                    devices_info['devices'][device_index]['tasks'] = []
+
+                    # ----------------------------------------------------- #
+                    # Default the state to 'not active' to indicate the     #
+                    # device is currently not performing a network capture. #
+                    # ---------------------------------------------------- #
+                    devices_info['devices'][device_index]['state'] = 'not active'
+
+                    event = 'Created new CPE record for device: [{}]'.format(target_device)
+                    logger.info('{} - {}'.format(log_id, event))
+
+                    event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
+                    logger.debug('{} - {}'.format(log_id, event))
 
                 # ---------------------------------------------------- #
                 # If a 'CAPTURE' request has been received, then start #
@@ -1902,31 +1874,6 @@ def main(argv):
                         logger.error('{} - {}'.format(log_id, event))
                         print('    - ERROR: {}'.format(event))
                         devices_info['devices'][device_index]['lastResponse'] = ''
-
-                    # ---------------------------------------------------- #
-                    # Check if last capture for device is still running.   #
-                    # This would indicate that the CPE capture app was     #
-                    # terminated before sending a STOP command to this     #
-                    # script. If so, then we need to clean up the previous #
-                    # tcpdump process.                                     #
-                    # ---------------------------------------------------- #
-                    if devices_info['devices'][device_index]['state'].lower() == 'active' and \
-                       devices_info['devices'][device_index]['lastRequest'] == 'CAPTURE':
-
-                        # --------------------- #
-                        # Stop previous capture #
-                        # --------------------- #
-                        event = 'Previous capture for this device is still active.'
-                        logger.warning('{} - {}'.format(log_id, event))
-                        print('    - WARNING: {}'.format(event))
-                        event = 'Stopping previous capture to start new capture request.'
-                        logger.warning('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
-                        # -------------------------------- #
-                        # Stop capture for this CPE device #
-                        # -------------------------------- #
-                        devices_info = stop_capture(logger, log_id, target_device, msg_info['filename'], devices_info)
 
                     # --------------------------------- #
                     # Start capture for this CPE device #

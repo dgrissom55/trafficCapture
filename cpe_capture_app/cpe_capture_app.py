@@ -381,7 +381,7 @@ def send_cli_script(logger, log_id, script, device, username, password):
     # text file part.                                          #
     # -------------------------------------------------------- #
     file_contents = {'file': ('cli.txt', script)}
-    event = 'REST API CLI Script:\n{}'.format(file_contents)
+    event = 'REST API CLI Script:\n{}'.format(json.dumps(file_contents, indent=4))
     logger.info('{} - {}'.format(log_id, event))
 
     # ---------------- #
@@ -1915,17 +1915,25 @@ def start_capture(logger, log_id, target_device, devices_info):
                 print('  + {}'.format(event))
 
                 if devices_info['devices'][device_index]['type'] == 'MSBR':
-                    cli_script = """
-debug capture data physical stop
-debug capture data physical eth-wan
-debug capture data physical start
-                    """
+
+                    # ---------------------------------------------------------- #
+                    # Build commands to start capture on defined MSBR interfaces #
+                    # ---------------------------------------------------------- #
+                    cli_script = 'debug capture data physical stop\n'
+                    for interface in devices_info['devices'][device_index]['interfaces']:
+                        cli_script += 'debug capture data physical {}\n'.format(interface)
+                    cli_script += 'debug capture data physical start\n'
+
                 else:
-                    cli_script = """
-debug capture voip physical stop
-debug capture voip physical eth-lan
-debug capture voip physical start
-                    """
+
+                    # ------------------------------------------------------------ #
+                    # Build commands to start capture on defined GW/SBC interfaces #
+                    # ------------------------------------------------------------ #
+                    cli_script = 'debug_capture voip physical stop\n'
+                    for interface in devices_info['devices'][device_index]['interfaces']:
+                        cli_script += 'debug capture voip physical {}\n'.format(interface)
+                    cli_script += 'debug_capture voip physical start\n'
+
                 start_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
 
                 # ---------------------- #
@@ -2719,9 +2727,10 @@ def main(argv):
     begin_timestamp = datetime.now()
     print('')
     print('===============================================================================')
-    print('                         CPE NETWORK TRAFFIC CAPTURES')
+    #print('                         CPE NETWORK TRAFFIC CAPTURES')
+    print(' Version: {:10s}     CPE NETWORK TRAFFIC CAPTURES'.format(version))
     print('===============================================================================')
-    print('   Version:'.format(version))
+    #print('   Version:'.format(version))
     print('Start Time:'.format(begin_timestamp))
     print('-------------------------------------------------------------------------------')
 

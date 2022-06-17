@@ -63,9 +63,9 @@ max_events_per_device = 1
 cpe_devices = [
     {
         "device": "192.168.200.218",
-        "type": "GWSBC",
+        "type": "MSBR",
         "interfaces": [
-            "eth-lan"
+            "eth-wan"
         ],
         "username": "Admin",
         "ovoc": "192.168.200.252"
