@@ -123,6 +123,7 @@ import socket
 import gzip
 import shutil
 #import pathlib
+import glob
 
 from datetime import datetime
 from getpass import getpass
@@ -467,6 +468,49 @@ def send_cmd_response(logger, log_id, udp_socket, response, address):
     return status
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: secure_json_dump                                                  #
+#                                                                             #
+# Dump devices dictionary in JSON format but mask items that could present a  #
+# security issue. The key elements passed in the masked list will be output   #
+# with asterisks in the value field.                                          #
+#                                                                             #
+# Parameters:                                                                 #
+#     devices_info - Dictionary to mask targeted output elements              #
+#     mask_list    - List of key elements to mask                             #
+#                                                                             #
+# Return:                                                                     #
+#    json_dump - JSON string: JSON output with masked values.                 #
+# --------------------------------------------------------------------------- #
+def secure_json_dump(logger, log_id, devices_info, mask_list):
+    """Mask values with asterisks for the key elements sent in the 'mask_list' parameter."""
+
+    json_dump = ''
+    temp_dict = {}
+    temp_dict['devices'] = []
+
+    for device in devices_info['devices']:
+
+        temp_dict['devices']
+        temp_dict['devices'].append({})
+        device_index = len(temp_dict['devices']) - 1
+
+        for key, value in device.items():
+
+            if key in mask_list:
+                temp_dict['devices'][device_index][key] = '*****'
+                event = 'Masking confidential information key: [{}]'.format(key)
+                logger.debug('{} - {}'.format(log_id, event))
+            else:
+                temp_dict['devices'][device_index][key] = value
+
+    json_dump = json.dumps(temp_dict, indent=4)
+
+    event = 'JSON:\n{}'.format(json_dump)
+    logger.debug('{} - {}'.format(log_id, event))
+
+    return json_dump
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: update_listen_port                                                #
 #                                                                             #
 # Update the value stored in the 'config.py' file if necessary that defines   #
@@ -586,12 +630,11 @@ def get_listen_port(logger, log_id):
     # Allow modification of stored UDP listen port #
     # -------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': UDP port to listen on for incoming CPE capture app command :')
-    print(': requests.                                                  :')
-    print(':                                                            :')
-    print(': NOTE: Entered port should be in the range (1025 - 65535)   :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': UDP port to listen on for incoming CPE capture app command requests.          :')
+    print(':                                                                               :')
+    print(': NOTE: Entered port should be in the range (1025 - 65535)                      :')
+    print(':===============================================================================:')
     got_listen_port = False
     while not got_listen_port:
 
@@ -755,12 +798,21 @@ def get_prevent_shutdown(logger, log_id):
     # Allow modification of stored prevent shutdown setting #
     # ----------------------------------------------------- #
     print('')
+<<<<<<< HEAD
     print(':============================================================:')
     print(': Setting to control whether or not shut down this script    :')
     print(': after all active captures have completed. Setting this     :')
     print(': to "y" prevents the script from shutting down and allows   :')
     print(': it to run indefinitely waiting for CPE capture commands.   :')
     print(':============================================================:')
+=======
+    print(':===============================================================================:')
+    print(': Setting to control whether or not shut down this script after all active      :')
+    print(': captures have completed. Setting this to "y" prevents the script from         :')
+    print(': shutting down and allows this script to run indefinitely waiting for CPE      :')
+    print(': capture commands.                                                             :')
+    print(':===============================================================================:')
+>>>>>>> 1.0.1
     this_prevent_shutdown = ''
     while this_prevent_shutdown == '':
         this_prevent_shutdown = str(raw_input('Prevent script from shutting down: (y/n) [{}] '.format(stored_prevent_shutdown))).lower().strip()
@@ -932,9 +984,9 @@ def get_interface_name(logger, log_id):
     # Allow modification of stored interface name #
     # ------------------------------------------- #
     print('')
-    print(':============================================================:')
-    print(': Network interface name to use for CPE traffic captures.    :')
-    print(':============================================================:')
+    print(':===============================================================================:')
+    print(': Name of the network interface to use for CPE traffic captures.                :')
+    print(':===============================================================================:')
     this_interface_name = ''
     while this_interface_name == '':
         this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name))).strip()
@@ -983,7 +1035,7 @@ def get_interface_name(logger, log_id):
 # Parameters:                                                                 #
 #     logger         - File handler for storing logged actions                #
 #     log_id         - Unique identifier for this devices log entries         #
-#     target_device  - CPE device to start network traffic capture filter on  #
+#     target_device  - CPE device to start network traffic capture on         #
 #     interface_name - Network interface name to start CPE capture on         #
 #     devices_info   - Dictionary of targeted devices                         #
 #                                                                             #
@@ -1003,8 +1055,6 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
             logger.debug('{} - {}'.format(log_id, event))
 
-            this_device_address = this_device['device']
-
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
             # ------------------------------------------------------- #
@@ -1017,14 +1067,14 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 
             if this_device['state'].lower() == 'not active':
 
-                print('Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
+                print('Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
 
                 # -------------------------------- #
                 # Create filename to store pcap as #
                 # -------------------------------- #
                 file_timestamp = datetime.now()
                 file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
-                filename = 'tmp_device_{}_{}.pcap'.format(this_device_address, file_timestamp)
+                filename = 'tmp_device_{}_{}.pcap'.format(this_device['device'], file_timestamp)
                 filename = re.sub(':', '.', filename)
 
                 # ------------------------------------------- #
@@ -1052,14 +1102,14 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
                 #                                                                       #
                 # Send normal output to /dev/null and echo out the PID number to save   #
                 # --------------------------------------------------------------------- #
-                capture_cmd = "nohup tcpdump -i {} -w ./captures/{} -W 3 -C 10 host {} > /dev/null 2>&1 & echo $!".format(interface_name, filename, this_device_address)
+                capture_cmd = "nohup tcpdump -i {} -w ./captures/{} -W 3 -C 10 host {} > /dev/null 2>&1 & echo $!".format(interface_name, filename, this_device['device'])
 
                 pid = os.popen(capture_cmd).read().strip()
 
                 # ------------------------------------------------------------ #
                 # Save PID in 'devices_info' dictionary record for this device #
                 # ------------------------------------------------------------ #
-                devices_info['devices'][device_index]['pid'] = pid
+                this_device['pid'] = pid
 
                 try:
                     os.kill(int(pid), 0)
@@ -1078,7 +1128,7 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                devices_info['devices'][device_index]['tasks'].append(start_capture_task.copy())
+                this_device['tasks'].append(start_capture_task.copy())
                 device_status = start_capture_task['status']
                 logger.debug('{} - {}'.format(log_id, device_status))
                 last_description = start_capture_task['description']
@@ -1101,16 +1151,16 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
-            devices_info['devices'][device_index]['tempCapture'] = filename
+            this_device['status'] = device_status
+            this_device['description'] = last_description
+            this_device['tempCapture'] = filename
 
             if started:
-                devices_info['devices'][device_index]['state'] = 'active'
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                this_device['state'] = 'active'
+                this_device['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['state'] = 'not active'
-                devices_info['devices'][device_index]['severity'] = 'CRITICAL'
+                this_device['state'] = 'not active'
+                this_device['severity'] = 'CRITICAL'
 
             break
 
@@ -1137,7 +1187,7 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 # Parameters:                                                                 #
 #     logger         - File handler for storing logged actions                #
 #     log_id         - Unique identifier for this devices log entries         #
-#     target_device  - CPE device to stop network traffic capture filter on   #
+#     target_device  - CPE device to stop network traffic capture on          #
 #     filename       - Capture filename used for the CPE capture app script   #
 #     devices_info   - Dictionary of targeted devices                         #
 #                                                                             #
@@ -1148,6 +1198,9 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 def stop_capture(logger, log_id, target_device, filename, devices_info):
     """Stop network traffic capture on specific device in the 'devices_info' dictionary."""
 
+    task_count = 0
+    fail_count = 0
+
     device_found = False
     device_index = 0
     for this_device in devices_info['devices']:
@@ -1157,20 +1210,19 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
             logger.debug('{} - {}'.format(log_id, event))
 
-            this_device_address = this_device['device']
-
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
             # ------------------------------------------------------- #
-            device_status = ''
-            device_severity = ''
-            last_description = ''
+            device_status = 'Success'
+            device_severity = 'Normal'
+            device_description = ''
 
             stopped = False
 
             if this_device['state'].lower() == 'active':
 
-                print('Stopping network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
+                task_count += 1
+                print('Stopping network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
 
                 # ------------------------------------------ #
                 # Attempt to stop tcpdump capture for device #
@@ -1181,7 +1233,6 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
 
                 stop_capture_task = {}
                 stop_capture_task['task'] = 'Stop capture'
-                stop_capture_task['description'] = 'Failed to stop tcpdump capture for device!'
                 task_timestamp = datetime.now()
                 stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
                 stop_capture_task['filename'] = filename
@@ -1189,29 +1240,42 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                 # ----------------------------------------------------------- #
                 # Get PID in 'devices_info' dictionary record for this device #
                 # ----------------------------------------------------------- #
-                pid = devices_info['devices'][device_index]['pid']
+                pid = this_device['pid']
 
-                try:
-                    os.kill(int(pid), 15)
-                except OSError:
-                    event = '{}'.format(err)
-                    logger.error('{} - {}'.format(log_id, event))
-                    stop_capture_task['status'] = 'Failure'
-                    stop_capture_task['description'] = event
-                    print('  - ERROR: {}'.format(event))
+                if pid != '':
+
+                    try:
+                        os.kill(int(pid), 15)
+                    except OSError:
+                        event = '{}'.format(err)
+                        logger.error('{} - {}'.format(log_id, event))
+                        stop_capture_task['status'] = 'Failure'
+                        stop_capture_task['description'] = event
+                        # ----------------------------------- #
+                        # Set failure status for device level #
+                        # ----------------------------------- #
+                        device_status = stop_capture_task['status']
+                        device_description = event
+                        logger.debug('{} - {}'.format(log_id, device_status))
+                        fail_count += 1
+                        print('  - ERROR: {}'.format(event))
+                    else:
+                        stop_capture_task['status'] = 'Success'
+                        event = 'Stopped capture on device as file: [{}]'.format(filename)
+                        stop_capture_task['description'] = event
+                        device_description = event
+                        stopped = True
+
                 else:
-                    stop_capture_task['status'] = 'Success'
-                    event = 'Stopped capture on device as file: [{}]'.format(filename)
-                    stop_capture_task['description'] = event
-                    stopped = True
+                    abort_capture_task['status'] = 'Failure'
+                    event = 'PID not found. Unable to identify tcpdump capture file to terminate.'
+                    abort_capture_task['description'] = event
+                    device_description = event
 
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
-                device_status = stop_capture_task['status']
-                logger.debug('{} - {}'.format(log_id, device_status))
-                last_description = stop_capture_task['description']
+                this_device['tasks'].append(stop_capture_task.copy())
 
                 # --------------- #
                 # Display results #
@@ -1230,6 +1294,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                 renamed = True
                 if stopped:
 
+<<<<<<< HEAD
                     rename_capture_task = {}
                     rename_capture_task['status'] = 'Success'
                     rename_capture_task['task'] = 'Rename capture files'
@@ -1241,17 +1306,36 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                     # -------------------------------------------------------------- #
                     # Get temporary filename used when starting the tcpdump captures #
                     # -------------------------------------------------------------- #
+=======
+                    # ----------------------------------------------------------- #
+                    # Get temporary base filename used when starting the tcpdump  #
+                    # captures. If there are multiple files (up to 3) then each   #
+                    # file will have a '0', '1', or '2' appended to the filename. #
+                    # ----------------------------------------------------------- #
+>>>>>>> 1.0.1
                     path = './captures/'
-                    temp_filename = devices_info['devices'][device_index]['tempCapture']
+                    temp_filename = this_device['tempCapture']
 
                     # -------------------------------------------------- #
                     # Rename up to 3 pcap files. The '-W 3' parameter on #
                     # the tcdump command in 'start_captures' sets the    #
                     # number of pcap files that are created per device.  #
                     # -------------------------------------------------- #
-                    for index in range(0, 2, 1):
+                    for index in range(0, 3, 1):
 
                         if os.path.exists(path + temp_filename + str(index)):
+
+                            task_count += 1
+
+                            base_file = temp_filename + str(index)
+
+                            # ------------------ #
+                            # Default to success #
+                            # ------------------ #
+                            rename_capture_task = {}
+                            rename_capture_task['task'] = 'Rename temporary capture file'
+                            task_timestamp = datetime.now()
+                            rename_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
 
                             # ------------------------------------------ #
                             # Set base filename for local files. Tcpdump #
@@ -1264,8 +1348,10 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                             #     basename-1.pcap                        #
                             #     basename-2.pcap                        #
                             # ------------------------------------------ #
-                            base_name = filename.rstrip('.pcap')
-                            local_file = path + base_name + '-' + str(index) + '.pcap'
+                            base_name = filename.lstrip('CPE_')
+                            base_name = base_name.rstrip('.pcap')
+                            local_file = path + 'OVOC_' + base_name + '-' + str(index) + '.pcap'
+                            rename_capture_task['filename'] = local_file
 
                             # ------------------------------------------- #
                             # Rename to match CPE capture script filename #
@@ -1275,54 +1361,284 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                             except Exception as err:
                                 event = 'Capture file renaming error: {}'.format(err)
                                 logger.error('{} - {}'.format(log_id, event))
-                                print('    - ERROR: {}'.format(event))
                                 rename_capture_task['status'] = 'Failure'
                                 rename_capture_task['description'] = event
+                                # ----------------------------------- #
+                                # Set failure status for device level #
+                                # ----------------------------------- #
+                                device_status = rename_capture_task['status']
+                                device_description = event
+                                logger.debug('{} - {}'.format(log_id, device_status))
+                                fail_count += 1
                                 renamed = False
+                                print('    - ERROR: {}'.format(event))
+                            else:
+                                rename_capture_task['status'] = 'Success'
+                                event = 'Successfully renamed capture file to match CPE capture script: [{}]'.format(base_file)
+                                logger.info('{} - {}'.format(log_id, event))
+                                event = 'Successfully renamed capture file: [{}]'.format(base_file)
+                                rename_capture_task['description'] = event
+                                device_description = event
+
+                            # ---------------------- #
+                            # Store task information #
+                            # ---------------------- #
+                            this_device['tasks'].append(rename_capture_task.copy())
+                            this_device['ovocCapture' + str(index)] = local_file
+
+                            # --------------- #
+                            # Display results #
+                            # --------------- #
+                            event = rename_capture_task['description']
+                            if rename_capture_task['status'].lower() == 'success':
+                                logger.info('{} - {}'.format(log_id, event))
+                                print('    - INFO: {}'.format(event))
+                            else:
+                                logger.error('{} - {}'.format(log_id, event))
+                                print('    - ERROR: {}'.format(event))
+
                         else:
                             event = 'Capture file may not exist: [{}]'.format(path + temp_filename + str(index))
                             logger.info('{} - {}'.format(log_id, event))
 
-                    # ---------------------- #
-                    # Store task information #
-                    # ---------------------- #
-                    devices_info['devices'][device_index]['tasks'].append(rename_capture_task.copy())
-                    device_status = rename_capture_task['status']
-                    logger.debug('{} - {}'.format(log_id, device_status))
-                    last_description = rename_capture_task['description']
-
-                    # --------------- #
-                    # Display results #
-                    # --------------- #
-                    event = rename_capture_task['description']
-                    if device_status.lower() == 'success':
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-                    else:
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - ERROR: {}'.format(event))
-
             else:
                 device_status = 'Failure'
-                last_description = 'Traffic capture is not active for CPE device!'
+                device_description = 'Traffic capture is not active for CPE device!'
 
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
-            devices_info['devices'][device_index]['lastCapture'] = filename
+            this_device['status'] = device_status
+            this_device['description'] = device_description
 
             if stopped:
-                devices_info['devices'][device_index]['state'] = 'not active'
+                this_device['state'] = 'not active'
+                this_device['pid'] = ''
                 if renamed:
-                    devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                    this_device['severity'] = 'NORMAL'
                 else:
-                    devices_info['devices'][device_index]['severity'] = 'MINOR'
-                    devices_info['devices'][device_index]['lastCapture'] = devices_info['devices'][device_index]['tempCapture']
+                    this_device['severity'] = 'MINOR'
             else:
-                devices_info['devices'][device_index]['state'] = 'active'
-                devices_info['devices'][device_index]['severity'] = 'MAJOR'
+                this_device['state'] = 'active'
+                this_device['severity'] = 'MAJOR'
+
+            break
+
+        device_index += 1
+
+    if not device_found:
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
+
+    return devices_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: abort_capture                                                     #
+#                                                                             #
+# Abort network traffic capture on a specifc CPE device. This function is     #
+# called when a second CAPTURE message is received by this script before      #
+# receiving a STOP for a previously active capture.                           #
+#                                                                             #
+# This would occur if the CPE capture app script terminated for some reason   #
+# prior to sending the STOP for any of its active capture sessions.           #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     target_device  - CPE device to abort network traffic capture on         #
+#     devices_info   - Dictionary of targeted devices                         #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def abort_capture(logger, log_id, target_device, devices_info):
+    """Abort network traffic capture on specific device in the 'devices_info' dictionary."""
+
+    task_count = 0
+    fail_count = 0
+
+    device_found = False
+    device_index = 0
+    for this_device in devices_info['devices']:
+        if this_device['device'] == target_device:
+
+            device_found = True
+            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+            logger.debug('{} - {}'.format(log_id, event))
+
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
+            device_status = 'Success'
+            device_severity = 'Normal'
+            device_description = ''
+
+            aborted = False
+
+            if this_device['state'].lower() == 'active':
+
+                task_count += 1
+                print('Aborting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
+
+                # ------------------------------------------ #
+                # Attempt to stop tcpdump capture for device #
+                # ------------------------------------------ #
+                event = 'Attempting to stop and delete active tcpdump capture on CPE device...'
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + {}'.format(event))
+
+                abort_capture_task = {}
+                abort_capture_task['task'] = 'Abort capture'
+                task_timestamp = datetime.now()
+                abort_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+                # ----------------------------------------------------------- #
+                # Get PID in 'devices_info' dictionary record for this device #
+                # ----------------------------------------------------------- #
+                pid = this_device['pid']
+
+                if pid != '':
+
+                    # ------------------------------------------------------ #
+                    # Get temporary base filename of current tcpdump capture #
+                    # ------------------------------------------------------ #
+                    temp_filename = this_device['tempCapture']
+
+                    try:
+                        os.kill(int(pid), 15)
+                    except OSError:
+                        event = '{}'.format(err)
+                        logger.error('{} - {}'.format(log_id, event))
+                        abort_capture_task['status'] = 'Failure'
+                        abort_capture_task['description'] = event
+                        # ----------------------------------- #
+                        # Set failure status for device level #
+                        # ----------------------------------- #
+                        device_status = abort_capture_task['status']
+                        device_description = event
+                        logger.debug('{} - {}'.format(log_id, device_status))
+                        fail_count += 1
+                        print('  - ERROR: {}'.format(event))
+                    else:
+                        abort_capture_task['status'] = 'Success'
+                        event = 'Aborted capture on device writing to base temporary file: [{}]'.format(temp_filename)
+                        abort_capture_task['description'] = event
+                        device_description = event
+                        aborted = True
+
+                else:
+                    abort_capture_task['status'] = 'Failure'
+                    event = 'PID not found. Unable to identify tcpdump capture file to terminate.'
+                    abort_capture_task['description'] = event
+                    device_description = event
+
+                # ---------------------- #
+                # Store task information #
+                # ---------------------- #
+                this_device['tasks'].append(abort_capture_task.copy())
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = abort_capture_task['description']
+                if device_status.lower() == 'success':
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
+                else:
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+                # -------------------------------------- #
+                # Remove temporary tcpdump capture files #
+                # -------------------------------------- #
+                removed = True
+                if aborted:
+
+                    path = './captures/'
+
+                    # -------------------------------------------------- #
+                    # Remove up to 3 pcap files. The '-W 3' parameter on #
+                    # the tcdump command in 'start_captures' sets the    #
+                    # number of pcap files that are created per device.  #
+                    # -------------------------------------------------- #
+                    for this_file in glob.glob(path + temp_filename + '*'):
+
+                        task_count += 1
+
+                        base_file = os.path.basename(this_file)
+
+                        # ------------------ #
+                        # Default to success #
+                        # ------------------ #
+                        remove_capture_task = {}
+                        remove_capture_task['task'] = 'Delete temporary capture file'
+                        task_timestamp = datetime.now()
+                        remove_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                        remove_capture_task['filename'] = base_file
+
+                        # ------------------------------------- #
+                        # Remove temporary tcpdump capture file #
+                        # ------------------------------------- #
+                        try:
+                            os.remove(this_file)
+                        except Exception as err:
+                            event = 'Capture file deletion error: {}'.format(err)
+                            logger.error('{} - {}'.format(log_id, event))
+                            remove_capture_task['status'] = 'Failure'
+                            remove_capture_task['description'] = event
+                            # ----------------------------------- #
+                            # Set failure status for device level #
+                            # ----------------------------------- #
+                            device_status = remove_capture_task['status']
+                            device_description = event
+                            logger.debug('{} - {}'.format(log_id, device_status))
+                            fail_count += 1
+                            removed = False
+                            print('    - ERROR: {}'.format(event))
+                        else:
+                            remove_capture_task['status'] = 'Success'
+                            event = 'Successfully deleted temporary capture file: [{}]'.format(base_file)
+                            remove_capture_task['description'] = event
+                            device_description = event
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        this_device['tasks'].append(remove_capture_task.copy())
+
+                        # --------------- #
+                        # Display results #
+                        # --------------- #
+                        event = remove_capture_task['description']
+                        if remove_capture_task['status'].lower() == 'success':
+                            logger.info('{} - {}'.format(log_id, event))
+                            print('    - INFO: {}'.format(event))
+                        else:
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('    - ERROR: {}'.format(event))
+
+            else:
+                device_status = 'Failure'
+                device_description = 'Traffic capture is not active for CPE device!'
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            this_device['status'] = device_status
+            this_device['description'] = device_description
+
+            if aborted:
+                this_device['state'] = 'not active'
+                this_device['pid'] = ''
+                if removed:
+                    this_device['severity'] = 'NORMAL'
+                else:
+                    this_device['severity'] = 'MINOR'
+            else:
+                this_device['state'] = 'active'
+                this_device['severity'] = 'MAJOR'
 
             break
 
@@ -1397,16 +1713,32 @@ def parse_message(logger, log_id, message):
             msg_info['deviceSerial'] = match.group(11).strip()
             msg_info['deviceDescription'] = match.group(12).strip()
 
-    elif re.search('^CAPTURE', message):
+    elif re.search('^STATUS', message):
 
-        event = 'Matched CPE capture script request'
+        event = 'Matched CPE capture script [STATUS] request'
         logger.debug('{} - {}'.format(log_id, event))
 
         # ------------ #
         # Set defaults #
         # ------------ #
         msg_info['type'] = 'request'
-        msg_info['request'] = 'CAPTURE'
+        msg_info['request'] = ''
+        msg_info['device'] = ''
+
+        match = re.search('(STATUS).*$', message)
+        if match:
+            msg_info['request'] = match.group(1).strip()
+
+    elif re.search('^CAPTURE', message):
+
+        event = 'Matched CPE capture script [CAPTURE] request'
+        logger.debug('{} - {}'.format(log_id, event))
+
+        # ------------ #
+        # Set defaults #
+        # ------------ #
+        msg_info['type'] = 'request'
+        msg_info['request'] = ''
         msg_info['device'] = ''
 
         match = re.search('(CAPTURE)\s+(.*$)', message)
@@ -1420,11 +1752,11 @@ def parse_message(logger, log_id, message):
         # Set defaults #
         # ------------ #
         msg_info['type'] = 'request'
-        msg_info['request'] = 'CAPTURE'
+        msg_info['request'] = ''
         msg_info['device'] = ''
         msg_info['filename'] = ''
 
-        event = 'Matched CPE capture script request'
+        event = 'Matched CPE capture script [STOP] request'
         logger.debug('{} - {}'.format(log_id, event))
 
         match = re.search('(STOP)\s+(.*?)\s+(.*$)', message)
@@ -1438,6 +1770,69 @@ def parse_message(logger, log_id, message):
     logger.debug('{} - {}'.format(log_id, event))
 
     return msg_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: get_device_index                                                  #
+#                                                                             #
+# Search for target device in records of 'devices_info' dictionary and return #
+# the index if found and if not found create a new record and return the new  #
+# record index.                                                               #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger        - File handler for storing logged actions                 #
+#     log_id        - Unique identifier for this devices log entries          #
+#     target_device - Target device to locate in 'devices_info' dictionary    #
+#     devices_info  - Dictionary of targeted devices                          #
+#                                                                             #
+# Return:                                                                     #
+#    device_index - Index of device record in 'devices_info' dictionary       #
+# --------------------------------------------------------------------------- #
+def get_device_index(logger, log_id, target_device, devices_info):
+    """Return the index of the device record in the 'devices_info' dictionary."""
+
+    device_index = -1
+
+    # ---------------------------------------------- #
+    # Search for device in 'devices_info' dictionary #
+    # ---------------------------------------------- #
+    device_found = False
+    index = 0
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
+            device_found = True
+            device_index = index
+
+            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+            logger.debug('{} - {}'.format(log_id, event))
+
+        index += 1
+
+    # ----------------------------------- #
+    # If not found, add new device record #
+    # ----------------------------------- #
+    if not device_found:
+
+        # ------------------------ #
+        # Create CPE device record #
+        # ------------------------ #
+        devices_info['devices'].append({})
+        device_index = len(devices_info['devices']) - 1
+        devices_info['devices'][device_index]['device'] = target_device
+        devices_info['devices'][device_index]['tasks'] = []
+
+        # ----------------------------------------------------- #
+        # Default the state to 'not active' to indicate the     #
+        # device is currently not performing a network capture. #
+        # ---------------------------------------------------- #
+        devices_info['devices'][device_index]['state'] = 'not active'
+
+        event = 'Created new CPE record for device: [{}]'.format(target_device)
+        logger.info('{} - {}'.format(log_id, event))
+
+        event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
+        logger.debug('{} - {}'.format(log_id, event))
+
+    return device_index
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: create_csv_file                                                   #
@@ -1648,7 +2043,7 @@ def main(argv):
     # ------------------ #
     # Set version number #
     # ------------------ #
-    version = '1.0'
+    version = config.version
 
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
@@ -1718,11 +2113,13 @@ def main(argv):
     #begin_timestamp = datetime.now()
     begin_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
-    print('===============================================================================')
-    print('                         OVOC NETWORK TRAFFIC CAPTURES')
-    print('===============================================================================')
-    print('Start Time : {}'.format(begin_timestamp))
-    print('-------------------------------------------------------------------------------')
+    print('=================================================================================')
+    #print('                         OVOC NETWORK TRAFFIC CAPTURES')
+    print(' Version: {:10s}     OVOC NETWORK TRAFFIC CAPTURES'.format(version))
+    print('=================================================================================')
+    #print('   Version: {}'.format(version))
+    print('Start Time: {}'.format(begin_timestamp))
+    print('---------------------------------------------------------------------------------')
 
     # ------------------------------------------------- #
     # Prepare UDP socket to receive command requests    #
@@ -1776,46 +2173,10 @@ def main(argv):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                # ---------------------------------------------- #
-                # Search for device in 'devices_info' dictionary #
-                # ---------------------------------------------- #
-                device_found = False
-                device_index = -1
-                index = 0
-                for device in devices_info['devices']:
-                    if device['device'] == target_device:
-                        device_found = True
-                        device_index = index
-
-                        event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
-                        logger.debug('{} - {}'.format(log_id, event))
-
-                    index += 1
-
-                # ----------------------------------- #
-                # If not found, add new device record #
-                # ----------------------------------- #
-                if not device_found:
-
-                    # ------------------------ #
-                    # Create CPE device record #
-                    # ------------------------ #
-                    devices_info['devices'].append({})
-                    device_index = len(devices_info['devices']) - 1
-                    devices_info['devices'][device_index]['device'] = target_device
-                    devices_info['devices'][device_index]['tasks'] = []
-
-                    # ----------------------------------------------------- #
-                    # Default the state to 'not active' to indicate the     #
-                    # device is currently not performing a network capture. #
-                    # ---------------------------------------------------- #
-                    devices_info['devices'][device_index]['state'] = 'not active'
-
-                    event = 'Created new CPE record for device: [{}]'.format(target_device)
-                    logger.info('{} - {}'.format(log_id, event))
-
-                    event = 'Create new device in devices information dictionary at index: [{}]'.format(device_index)
-                    logger.debug('{} - {}'.format(log_id, event))
+                # ------------------------------------------------- #
+                # Get index for device in 'devices_info' dictionary #
+                # ------------------------------------------------- #
+                device_index = get_device_index(logger, log_id, target_device, devices_info)
 
                 # ---------------------------------------------------- #
                 # If a 'CAPTURE' request has been received, then start #
@@ -1851,6 +2212,31 @@ def main(argv):
                         logger.error('{} - {}'.format(log_id, event))
                         print('    - ERROR: {}'.format(event))
                         devices_info['devices'][device_index]['lastResponse'] = ''
+
+                    # ---------------------------------------------------- #
+                    # Check if last capture for device is still running.   #
+                    # This would indicate that the CPE capture app was     #
+                    # terminated before sending a STOP command to this     #
+                    # script. If so, then we need to clean up the previous #
+                    # tcpdump process.                                     #
+                    # ---------------------------------------------------- #
+                    if devices_info['devices'][device_index]['state'].lower() == 'active' and \
+                       devices_info['devices'][device_index]['lastRequest'] == 'CAPTURE':
+
+                        # ---------------------- #
+                        # Abort previous capture #
+                        # ---------------------- #
+                        event = 'Previous capture for this device is still active.'
+                        logger.warning('{} - {}'.format(log_id, event))
+                        print('    - WARNING: {}'.format(event))
+                        event = 'Aborting previous capture to start new capture request.'
+                        logger.warning('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+
+                        # --------------------------------- #
+                        # Abort capture for this CPE device #
+                        # --------------------------------- #
+                        devices_info = abort_capture(logger, log_id, target_device, devices_info)
 
                     # --------------------------------- #
                     # Start capture for this CPE device #
@@ -1896,6 +2282,7 @@ def main(argv):
                     # Save this command request in 'devices_info' dictionary #
                     # ------------------------------------------------------ #
                     devices_info['devices'][device_index]['lastRequest'] = 'STOP'
+                    devices_info['devices'][device_index]['cpeCapture'] = msg_info['filename']
 
                     # ----------------------------------------------- #
                     # Send TRYING response to CPE capture app script. #
@@ -1974,7 +2361,7 @@ def main(argv):
             # ------------------------------------------------ #
             # For debugging - Output 'devices_info' dictionary #
             # ------------------------------------------------ #
-            event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
+            event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
             logger.debug('{} - {}'.format(log_id, event))
 
             event = 'Listening for command messages on UDP port: [{}]'.format(listen_port)
@@ -1998,9 +2385,9 @@ def main(argv):
     #end_timestamp = datetime.now()
     end_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
-    print('===============================================================================')
+    print('=================================================================================')
     print('                              PROCESSING SUMMARY')
-    print('===============================================================================')
+    print('=================================================================================')
     print('Completed: '.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
