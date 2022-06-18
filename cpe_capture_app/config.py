@@ -69,24 +69,5 @@ cpe_devices = [
         ],
         "username": "Admin",
         "ovoc": "192.168.200.252"
-    },
-    {
-        "device": "192.168.200.219",
-        "type": "MSBR",
-        "interfaces": [
-            "eth-wan",
-            "eth-lan"
-        ],
-        "username": "Admin",
-        "ovoc": "192.168.200.252"
-    },
-    {
-        "device": "192.168.200.220",
-        "type": "GWSBC",
-        "interfaces": [
-            "eth-lan"
-        ],
-        "username": "Admin",
-        "ovoc": "192.168.200.253"
     }
 ]

@@ -8,6 +8,8 @@
 - Output the script version in the section displaying the execution events.
 - Added support for managing debug captures on Gateway and SBC devices.
 - Added logging of the CLI scripts to the log file.
+- Passwords are masked in any logging output.
+- When capturing on MSBR devices you can now select multiple WAN interfaces to simultaneously capture on.
 
 ## v1.0.0
 

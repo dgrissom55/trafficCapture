@@ -2087,14 +2087,20 @@ def start_capture(logger, log_id, target_device, devices_info):
                 # --------------- #
                 # Display results #
                 # --------------- #
-                event = start_capture_task['description']
                 if device_status.lower() == 'success':
                     submitted = True
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
-                else:
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('    - ERROR: {}'.format(event))
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                #event = start_capture_task['description']
+                #if device_status.lower() == 'success':
+                #    submitted = True
+                #    logger.info('{} - {}'.format(log_id, event))
+                #    print('    - INFO: {}'.format(event))
+                #else:
+                #    logger.error('{} - {}'.format(log_id, event))
+                #    print('    - ERROR: {}'.format(event))
 
                 attempt += 1
 
@@ -2124,24 +2130,16 @@ debug capture voip physical show
                     # --------------- #
                     if re.search('Debug capture physical is active', verify_started_task['output']):
                         started = True
-                        event = verify_started_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
                         event = 'Debug capture is active.'
                         verify_started_task['description'] = event
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
                     elif re.search('Debug capture physical is not active', verify_started_task['output']):
                         started = False
-                        event = verify_started_task['description']
-                        logger.error('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
-
                         event = 'Failed to start debug capture on device!'
                         verify_started_task['description'] = event
-                        logger.info('{} - {}'.format(log_id, event))
-                        print('    - INFO: {}'.format(event))
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
                     else:
                         event = verify_started_task['description']
                         logger.error('{} - {}'.format(log_id, event))
@@ -2426,8 +2424,8 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                     retrieve_capture_task['filename'] = ''
 
                     ssh = paramiko.SSHClient()
-                    #ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    #ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
                     try:
                         ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
                         event = 'Connected to device'
@@ -2863,13 +2861,13 @@ def main(argv):
     begin_time = time.time()
     begin_timestamp = datetime.now()
     print('')
-    print('===============================================================================')
+    print('=================================================================================')
     #print('                         CPE NETWORK TRAFFIC CAPTURES')
     print(' Version: {:10s}     CPE NETWORK TRAFFIC CAPTURES'.format(version))
-    print('===============================================================================')
+    print('=================================================================================')
     #print('   Version:'.format(version))
     print('Start Time:'.format(begin_timestamp))
-    print('-------------------------------------------------------------------------------')
+    print('---------------------------------------------------------------------------------')
 
     # --------------------------------------------- #
     # Prepare UDP socket to listen for OVOC alarms  #
@@ -2896,64 +2894,65 @@ def main(argv):
         # ------------------------------------------------------ #
         # Check for running OVOC capture scripts for each device #
         # ------------------------------------------------------ #
-        send_status_to_ovoc_scripts(logger, log_id, server_socket, devices_info)
+        #send_status_to_ovoc_scripts(logger, log_id, server_socket, devices_info)
 
         # ----------------------------------------- #
         # Start captures on all defined CPE devices #
         # ----------------------------------------- #
-        #index = 0
-        #while index < len(devices_info['devices']):
+        index = 0
+        while index < len(devices_info['devices']):
 
-        #    this_device_address = ''
-        #    this_device_username = ''
-        #    this_device_password = ''
+            this_device_address = ''
+            this_device_username = ''
+            this_device_password = ''
 
-        #    for key in devices_info['devices'][index]:
-        #        if key == 'device':
-        #            this_device_address = devices_info['devices'][index][key]
-        #        if key == 'username':
-        #            this_device_username = devices_info['devices'][index][key]
-        #        if key == 'password':
-        #            this_device_password = devices_info['devices'][index][key]
-        #        if key == 'ovoc':
-        #            this_ovoc_address = devices_info['devices'][index][key]
+            for key in devices_info['devices'][index]:
+                if key == 'device':
+                    this_device_address = devices_info['devices'][index][key]
+                if key == 'username':
+                    this_device_username = devices_info['devices'][index][key]
+                if key == 'password':
+                    this_device_password = devices_info['devices'][index][key]
+                if key == 'ovoc':
+                    this_ovoc_address = devices_info['devices'][index][key]
 
-        #    if this_device_address != '' and \
-        #       this_device_username != '' and \
-        #       this_device_password != '' and \
-        #       this_ovoc_address != '':
+            if this_device_address != '' and \
+               this_device_username != '' and \
+               this_device_password != '' and \
+               this_ovoc_address != '':
 
-        #        # -------------------------------- #
-        #        # Start capture on this CPE device #
-        #        # -------------------------------- #
-        #        devices_info = start_capture(logger, log_id, this_device_address, devices_info)
+                # -------------------------------- #
+                # Start capture on this CPE device #
+                # -------------------------------- #
+                devices_info = start_capture(logger, log_id, this_device_address, devices_info)
 
-        #        if devices_info['devices'][index]['status'] == 'active':
-        #            # ------------------------------------------------------- #
-        #            # Send CAPTURE command to OVOC capture app script to      #
-        #            # trigger it to start a 'tcpdump' capture on this device. #
-        #            # ------------------------------------------------------- #
-        #            this_request = 'CAPTURE {}'.format(this_device_address)
-        #            event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
-        #            logger.info('{} - {}'.format(log_id, event))
-        #            print('  + {}'.format(event))
-        #            if send_cmd_request(logger, log_id, server_socket, this_request, this_ovoc_address):
-        #                event = 'Successfully sent request to start capture on OVOC server.'
-        #                logger.info('{} - {}'.format(log_id, event))
-        #                print('    - INFO: {}'.format(event))
+                if devices_info['devices'][index]['state'] == 'active':
 
-        #                # ------------------------------------------------------ #
-        #                # Save this command request in 'devices_info' dictionary #
-        #                # ------------------------------------------------------ #
-        #                devices_info['devices'][index]['lastRequest'] = 'CAPTURE'
+                    # ------------------------------------------------------- #
+                    # Send CAPTURE command to OVOC capture app script to      #
+                    # trigger it to start a 'tcpdump' capture on this device. #
+                    # ------------------------------------------------------- #
+                    this_request = 'CAPTURE {}'.format(this_device_address)
+                    event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+                    if send_request(logger, log_id, server_socket, this_request, this_ovoc_address):
+                        event = 'Successfully sent request to start capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
 
-        #            else:
-        #                event = 'Failed to send request to start capture on OVOC server!'
-        #                logger.error('{} - {}'.format(log_id, event))
-        #                print('    - ERROR: {}'.format(event))
-        #                devices_info['devices'][index]['lastRequest'] = ''
+                        # ------------------------------------------------------ #
+                        # Save this command request in 'devices_info' dictionary #
+                        # ------------------------------------------------------ #
+                        devices_info['devices'][index]['lastRequest'] = 'CAPTURE'
 
-        #    index += 1
+                    else:
+                        event = 'Failed to send request to start capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        devices_info['devices'][index]['lastRequest'] = ''
+
+            index += 1
 
         # ------------------------------------------------ #
         # For debugging - Output 'devices_info' dictionary #
@@ -3039,7 +3038,7 @@ def main(argv):
                         event = 'Sending message to stop capture on OVOC server: [{}]'.format(this_request)
                         logger.info('{} - {}'.format(log_id, event))
                         print('  + {}'.format(event))
-                        if send_cmd_request(logger, log_id, server_socket, this_request, this_ovoc_address):
+                        if send_request(logger, log_id, server_socket, this_request, this_ovoc_address):
                             event = 'Successfully sent request to stop capture on OVOC server.'
                             logger.info('{} - {}'.format(log_id, event))
                             print('    - INFO: {}'.format(event))
@@ -3164,9 +3163,9 @@ def main(argv):
     end_time = time.time()
     end_timestamp = datetime.now()
     print('')
-    print('===============================================================================')
+    print('=================================================================================')
     print('                              PROCESSING SUMMARY')
-    print('===============================================================================')
+    print('=================================================================================')
     print('Completed:'.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
