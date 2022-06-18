@@ -1331,11 +1331,7 @@ def get_cpe_devices(logger, log_id):
             # ------------------------------------ #
             this_ovoc_address = ''
             while this_ovoc_address == '':
-<<<<<<< HEAD
-                this_ovoc_address = str(input('CPE device #{} associated OVOC IP address or FQDN: '.format(used_device_index + 1))).strip()
-=======
                 this_ovoc_address = str(input('  - Associated OVOC IP address or FQDN: ')).strip()
->>>>>>> 1.0.1
                 event = 'Entered CPE associated OVOC: [{}]'.format(this_ovoc_address)
                 logger.info('{} - {}'.format(log_id, event))
                 # ------------------------------------------------------ #
@@ -1345,17 +1341,10 @@ def get_cpe_devices(logger, log_id):
                 if not valid_address:
                     event = 'Must enter an valid IPv4/IPv6 address or FQDN to use for the CPE associated OVOC address.'
                     logger.error('{} - {}'.format(log_id, event))
-<<<<<<< HEAD
-                    print('  - ERROR: {}'.format(event))
-                    this_ovoc_address = ''
-
-            event = 'Set new CPE device address to: [{}]'.format(this_ovoc_address)
-=======
                     print('    - ERROR: {}'.format(event))
                     this_ovoc_address = ''
 
             event = 'Set new CPE associated OVOC address to: [{}]'.format(this_ovoc_address)
->>>>>>> 1.0.1
             logger.info('{} - {}'.format(log_id, event))
 
             # ------------------------ #

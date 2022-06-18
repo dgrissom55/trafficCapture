@@ -798,21 +798,12 @@ def get_prevent_shutdown(logger, log_id):
     # Allow modification of stored prevent shutdown setting #
     # ----------------------------------------------------- #
     print('')
-<<<<<<< HEAD
-    print(':============================================================:')
-    print(': Setting to control whether or not shut down this script    :')
-    print(': after all active captures have completed. Setting this     :')
-    print(': to "y" prevents the script from shutting down and allows   :')
-    print(': it to run indefinitely waiting for CPE capture commands.   :')
-    print(':============================================================:')
-=======
     print(':===============================================================================:')
     print(': Setting to control whether or not shut down this script after all active      :')
     print(': captures have completed. Setting this to "y" prevents the script from         :')
     print(': shutting down and allows this script to run indefinitely waiting for CPE      :')
     print(': capture commands.                                                             :')
     print(':===============================================================================:')
->>>>>>> 1.0.1
     this_prevent_shutdown = ''
     while this_prevent_shutdown == '':
         this_prevent_shutdown = str(raw_input('Prevent script from shutting down: (y/n) [{}] '.format(stored_prevent_shutdown))).lower().strip()
@@ -1294,25 +1285,11 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                 renamed = True
                 if stopped:
 
-<<<<<<< HEAD
-                    rename_capture_task = {}
-                    rename_capture_task['status'] = 'Success'
-                    rename_capture_task['task'] = 'Rename capture files'
-                    rename_capture_task['description'] = 'Successfully renamed capture files to match CPE capture script.'
-                    task_timestamp = datetime.now()
-                    rename_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    rename_capture_task['filename'] = filename
-
-                    # -------------------------------------------------------------- #
-                    # Get temporary filename used when starting the tcpdump captures #
-                    # -------------------------------------------------------------- #
-=======
                     # ----------------------------------------------------------- #
                     # Get temporary base filename used when starting the tcpdump  #
                     # captures. If there are multiple files (up to 3) then each   #
                     # file will have a '0', '1', or '2' appended to the filename. #
                     # ----------------------------------------------------------- #
->>>>>>> 1.0.1
                     path = './captures/'
                     temp_filename = this_device['tempCapture']
 
