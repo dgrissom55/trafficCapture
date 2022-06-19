@@ -235,7 +235,9 @@ On the servers hosting the CPE capture script: `cpe_capture_app.py`
 * Python 3.6+
 * Module `requests` for sending REST API requests to the CPE devices.
 
-  <b>NOTE:</b> CPE devices will need to allow access to TCP port 443.
+  > **Note**
+  > 
+  > CPE devices will need to allow access to TCP port 443.
   ```sh
   pip3 install requests
   ```
@@ -249,7 +251,9 @@ On the servers hosting the CPE capture script: `cpe_capture_app.py`
   ```
 * Module `paramiko` for SFTP transfers of capture files from the CPE devices.
 
-  <b>NOTE:</b> CPE devices will need to allow access to TCP port 22.
+  > **Note**
+  > 
+  > CPE devices will need to allow access to TCP port 22.
   ```sh
   pip3 install requests
   ```
@@ -272,7 +276,9 @@ OVOC Server:
 
 ### Installation
 
-<b>NOTE:</b> The `ovoc_capture_app.py` script should be running prior to starting the `cpe_capture_app.py` script(s).
+> **Note**
+> 
+> The `ovoc_capture_app.py` script should be running prior to starting the `cpe_capture_app.py` script(s).
 
 <br>
 
@@ -301,8 +307,274 @@ On the servers hosting the CPE capture script:
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-1. Run `ovoc_capture_app.py` on OVOC server managing a targeted CPE device.
+1. Run `ovoc_capture_app.py` on OVOC server managing a targeted CPE device and answer the following interactive input:
+
+
+      > **Note**
+      > 
+      > Python 2.7.x is the version of Python shipped with the OVOC server. You must use the following method `python` to start the script using Python 2.7.x on the OVOC server.
+      
+      ```sh
+      python ovoc_capture_app.py
+      ```
+  
+  
+      The allowed values that can be entered are displayed in the parentheses `(allowed values)`.
+      Stored values from previous runs of the script are displayed in square brackets `[previously entered value]`.
+      
+      To accept the previously entered value, simply hit the `enter` key.
+
+      The entry for the UDP port that this OVOC capture script listens on for request commands from running CPE capture scripts. This port is used for receiving and sending the synchronization requests and responses between the CPE capture scripts and this associated OVOC capture script running on the OVOC server. For example, the port is used for receiving the `CAPTURE` request to an OVOC capture script and sending for `TRYING` after receipt of the request and sending an `OK or FAIL` response after the tcpdump process is spawned.
+
+      ```sh
+      :===============================================================================:
+      : UDP port to listen on for incoming CPE capture app command requests.          :
+      :                                                                               :
+      : NOTE: Entered port should be in the range (1025 - 65535)                      :
+      :===============================================================================:
+      Enter UPD port to listen on: (1025-65535) [20001] 
+        - INFO: Set UDP port to listen on to: [20001]
+      ```
+  
+      ```sh
+      :===============================================================================:
+      : Setting to control whether or not shut down this script after all active      :
+      : captures have completed. Setting this to "y" prevents the script from         :
+      : shutting down and allows this script to run indefinitely waiting for CPE      :
+      : capture commands.                                                             :
+      :===============================================================================:
+      Prevent script from shutting down: (y/n) [y] 
+        - INFO: Set prevent script shutdown setting to: [y]
+      ```
+  
+  
+      The list of network interfaces is dynamically created by the script by reading in the interfaces on the OVOC system that the script is running on. This list of allowed values may change for different OVOC servers.
+      
+      ```sh
+      :===============================================================================:
+      : Name of the network interface to use for CPE traffic captures.                :
+      :===============================================================================:
+      Enter network interface name for capture: (ens192|lo) [ens192] 
+        - INFO: Set network interface name for captures to: [ens192]
+      ```
+
+
+      After the the interactive input, the script waits for `request` commands from the CPE capture app.
+  
+      ```sh
+      =================================================================================
+      Version: 1.0.1          OVOC NETWORK TRAFFIC CAPTURES
+      =================================================================================
+      Start Time: 2022-06-19 15:35:59.388079
+      ---------------------------------------------------------------------------------
+      Listening for command messages on UDP port: [20001]
+      ```
+<br>
+
 2. Run `cpe_capture_app.py` on server that has access to both the CPE device and also the associated OVOC server.
+
+
+      > **Note**
+      > 
+      > Python 3.6+ is required for running the CPE capture script on an external computer. You should not run this script on the OVOC server since the goal is to see if the communication between the OVOC server and the CPE device truly is having communication issues. You must use the following method `python3`, or a symbolic link to python3, to start the script using Python 3.6+ on the external computer. Please see the section <a href="#usage">Usage</a> for prerequisites.
+      
+      ```sh
+      python3 cpe_capture_app.py
+      ```
+  
+      > **Note**
+      > 
+      > Multiple CPE devices can be targeted for each run of this script. This CPE script coordinates and separates the captures for each CPE device.
+      
+      > **Note**
+      > 
+      > Error checking and validation is done on each input item. For IP address and FQDN entries, the entered value is validated before allowing you to enter other information. Also, you can not enter blank/empty passwords. A valid password is required. The entered passwords are not echoed to the screen and require confirmation. If the entered password and confirmed password do not match, you'll be prompted to try again.
+      
+      The following example is an entry of a targeted MSBR device when there are no previously stored devices. After the `type` value is entered as `MSBR`, there are options for which interfaces you would like to capture on. You can select multiple interfaces for a capture session. In the example below, the `eth-wan` and `cellular-wan` interfaces are selected for this capture session.
+      
+      ```sh
+      :===============================================================================:
+      : Create a set of CPE devices to target for network traffic captures. Enter the :
+      : required information to use when connecting to each device.                   :
+      :                                                                               :
+      : NOTE: Previously entered CPE devices are recalled and can  be modified if     :
+      :       desired.                                                                :
+      :                                                                               :
+      : NOTE: To remove a stored device, type "delete" for the CPE device address.    :
+      :===============================================================================:
+      CPE device #1:
+        - IP address or FQDN: 192.168.200.218
+        - Type: (msbr|gwsbc) msbr
+        
+        MSBR capture interface options:
+        :-----------------------------------------------------------------------------:
+        : Valid Options: "cellular-wan", "fiber-wan", "xdsl-wan", "shdsl-wan",        :
+        :                "t1-e1-wan", "eth-wan", or "eth-lan"                         :
+        :                                                                             :
+        : NOTE: To remove a stored interface, type "delete" for the entry.            :
+        :-----------------------------------------------------------------------------:
+        - Capture interface #1: eth-wan
+          Add another capture interface: (y/n) [n] y
+        - Capture interface #2: cellular-wan
+          Add another capture interface: (y/n) [n] n
+        - Username: Admin
+        - Password: 
+          Confirm password: 
+          - INFO: Entered passwords match!
+        - Associated OVOC IP address or FQDN: 192.168.200.252
+        
+      Add another targeted CPE device: (y/n) [n] 
+        - INFO: Updates for list of targeted CPE devices successfully prepared.
+        - INFO: Successfully updated "config.py" file
+      ```
+  
+      The following example is an entry of a targeted Gateway or SBC device when there are no previously stored devices. When the `type` is set to `GWSBC`, then there is no option for selecting the capture interface for this session. On those devices, there is only one type of interface `eth-lan` and it will be used for this devices capture session.
+      
+      ```sh
+      ===============================================================================:
+      : Create a set of CPE devices to target for network traffic captures. Enter the :
+      : required information to use when connecting to each device.                   :
+      :                                                                               :
+      : NOTE: Previously entered CPE devices are recalled and can  be modified if     :
+      :       desired.                                                                :
+      :                                                                               :
+      : NOTE: To remove a stored device, type "delete" for the CPE device address.    :
+      :===============================================================================:
+      CPE device #1:
+        - IP address or FQDN: (delete) [192.168.200.218] delete
+          - INFO: Removed CPE device [192.168.200.218] from list of targeted devices.
+      CPE device #1:
+        - IP address or FQDN: 192.168.200.210
+        - Type: (msbr|gwsbc) gwsbc
+        - Username: Admin
+        - Password: 
+          Confirm password: 
+          - INFO: Entered passwords match!
+        - Associated OVOC IP address or FQDN: 192.168.200.252
+      
+      Add another targeted CPE device: (y/n) [n] 
+        - INFO: Updates for list of targeted CPE devices successfully prepared.
+        - INFO: Successfully updated "config.py" file
+      ```
+  
+      Stored values from previous runs of the script are displayed in square brackets `[previously entered value]`.
+      
+      To accept the previously entered value, simply hit the `enter` key.
+
+      To remove a previously store CPE device from the targeted list, enter `delete` to remove it as shown below. If there was only one targeted CPE devices stored, then you'll get the following input prompt `CPE device #x` so that you can enter at least one device to capture traffic.
+      
+      The following example is an interactive entry session in which the Gateway/SBC device `is removed from the targeted list, but the MSBR device is targeted again. On the MSBR device, the `cellular-wan` interface is removed from the traffic capture.
+
+      ```sh
+      :===============================================================================:
+      : Create a set of CPE devices to target for network traffic captures. Enter the :
+      : required information to use when connecting to each device.                   :
+      :                                                                               :
+      : NOTE: Previously entered CPE devices are recalled and can  be modified if     :
+      :       desired.                                                                :
+      :                                                                               :
+      : NOTE: To remove a stored device, type "delete" for the CPE device address.    :
+      :===============================================================================:
+      CPE device #1:
+        - IP address or FQDN: (delete) [192.168.200.210] delete
+          - INFO: Removed CPE device [192.168.200.210] from list of targeted devices.
+      CPE device #1:
+        - IP address or FQDN: (delete) [192.168.200.218] 
+        - Type: (msbr|gwsbc) [MSBR] 
+      
+        MSBR capture interface options:
+        :-----------------------------------------------------------------------------:
+        : Valid Options: "cellular-wan", "fiber-wan", "xdsl-wan", "shdsl-wan",        :
+        :                "t1-e1-wan", "eth-wan", or "eth-lan"                         :
+        :                                                                             :
+        : NOTE: To remove a stored interface, type "delete" for the entry.            :
+        :-----------------------------------------------------------------------------:
+        Stored interfaces: [eth-wan, cellular-wan]
+        - Capture interface #1: (delete) [eth-wan] 
+        - Capture interface #2: (delete) [cellular-wan] delete
+          - INFO: Removed interface [cellular-wan] from list to capture.
+          Add another capture interface: (y/n) [n] n
+        - Username: [Admin] 
+        - Password: 
+          Confirm password: 
+          - INFO: Entered passwords match!
+        - Associated OVOC IP address or FQDN: [192.168.200.252] 
+      
+      Add another targeted CPE device: (y/n) [n] 
+        - INFO: Updates for list of targeted CPE devices successfully prepared.
+        - INFO: Successfully updated "config.py" file
+      ```
+  
+      The following entry of for the UDP port that this CPE capture script will listen on for forward alarms from each devices targeted OVOC server. Each server should have SNMP alarm rules setup for the `Connection Alarm` event that is triggered when the OVOC server and the CPE device lose communication with each other. A rule should manually be setup in each OVOC server that is associated with the devices that are targeted for capture sessions.
+      
+      In addition to the SNMP forwarded alarms that will be processed by the CPE capture script, this same port is used for sending and receiving the synchronization requests and responses between this CPE capture script and the associated OVOC capture script running on the OVOC servers. For example, the port is used for sending the `CAPTURE` request to an OVOC capture script after the debug capture has started on the targeted CPE device and waiting for `TRYING` after the OVOC capture script received the request and then an `OK or FAIL` response after the OVOC capture script has started for failed to start the spawned tcpdump process.
+
+
+      ```sh
+      :===============================================================================:
+      : UDP port to listen on for incoming alarms forwarded by an OVOC server. Alarms :
+      : are expected to be in SYSLOG format.                                          :
+      :                                                                               :
+      : NOTE: Entered port should be in the range (1025 - 65535)                      :
+      :===============================================================================:
+      Enter UPD port to listen on: (1025-65535) [20001] 
+        - INFO: Set UDP port to listen on to: [20001]
+      ```
+  
+      When sending REST API commands to the CPE devices, this setting tries to ensure that REST API requests are successful by retrying the request. Sometimes it has been noticed that the CPE may not be online or have a temporary hiccup and not accept the first request. This will also ensure that any true network outages can attempt to be handled without losing the contents of the capture session.
+      
+      ```sh
+      :===============================================================================:
+      : Maximum number of REST API retry attempts allowed when  sending requests to   :
+      : CPE devices.                                                                  :
+      :                                                                               :
+      : NOTE: Entered value should be in the range (1 - 100)                          :
+      :===============================================================================:
+      Enter REST API retry attempts: (1-100) [10] 
+        - INFO: Set REST API retry attempts to: [10]
+      ```
+     
+      This entry controls how many captures are performed for each targeted CPE device. If a `Connection Lost` SNMP alarm is received for a device, then this setting restarts a new capture session until this entry has been decremented to 0. The current capture sessions (`debug capture` on device and the `tcpdump` on the OVOC server) is terminated on each receipt of the `Connection Lost` SNMP alarm and those captures are stored with the same filenames. This setting restarts that process.
+      
+      ```sh
+      :===============================================================================:
+      : Maximum number of OVOC alarm events that can be received per device that      :
+      : trigger the retrieval of the network capture from a CPE device.               :
+      :                                                                               :
+      : If the triggering events counter is less than the value, then the network     :
+      : traffic capture is restarted on the CPE device.                               :
+      :                                                                               :
+      : NOTE: Currently triggering on "Connection Lost" alarm.                        :
+      :                                                                               :
+      : NOTE: Entered value should be in the range (1 - 50)                           :
+      :===============================================================================:
+      Enter OVOC alarm trigger events per device: (1-50) [1] 
+        - INFO: Set OVOC alarm trigger events per device to: [1]
+      ```     
+
+      After the entries are complete, the CPE capture script starts the debug capture on each targeted CPE device and then sends the `CAPTURE` command to the appropriate OVOC capture script app.
+      
+      ```sh
+      =================================================================================
+      Version: 1.0.1          CPE NETWORK TRAFFIC CAPTURES
+      =================================================================================
+      Start Time:
+      ---------------------------------------------------------------------------------
+      Starting network traffic capture on CPE device #1: [192.168.200.218]
+        + Attempting to start debug capture on CPE device...
+        + Verifying debug capture started...
+          - INFO: Debug capture is active.
+        + Sending message to start capture on OVOC server: [CAPTURE 192.168.200.218]
+        + Sending message to OVOC capture script: [CAPTURE 192.168.200.218]
+          - INFO: Successfully sent request to OVOC capture script.
+          - INFO: Successfully sent request to start capture on OVOC server.
+      Listening for OVOC alarms and command messages on UDP port: [20001]
+        + Received response [TRYING] from OVOC associated with device: [192.168.200.218]
+      Listening for OVOC alarms and command messages on UDP port: [20001]
+        + Received response [OK] from OVOC associated with device: [192.168.200.218]
+      Listening for OVOC alarms and command messages on UDP port: [20001]
+      ```
+  
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
