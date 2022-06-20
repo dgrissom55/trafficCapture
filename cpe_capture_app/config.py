@@ -5,7 +5,7 @@
 # -------------- #
 # Script version #
 # -------------- #
-version = '1.0.1'
+version = '1.0.2'
 
 # ----------------------------------- #
 # Directory to store application logs #
@@ -40,8 +40,17 @@ listen_port = 20001
 # UDP port that the complementary traffic capture Python script on    #
 # the OVOC server is listening on. Commands are sent to the OVOC app  #
 # to start and stop traffic captures for the targeted CPE devices.    #
+# NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
 ovoc_listen_port = 20001
+
+# ------------------------------------------------------------------- #
+# Max registration attempts when a CPE setups up communications to an #
+# OVOC capture app. If registration is unsuccessful, the device will  #
+# not perform any captures for the current session.                   #
+# NOTE: This value can be set via interactive entry from this script. #
+# ------------------------------------------------------------------- #
+max_reg_attempts = 5
 
 # ------------------------------------------------------------------- #
 # Max retries for failed REST API requests.                           #

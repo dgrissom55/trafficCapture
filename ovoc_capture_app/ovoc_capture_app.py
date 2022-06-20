@@ -48,13 +48,15 @@ On the OVOC servers, the network captures are performed by issuing system
 calls to the 'tcpdump' app. To start a capture on an OVOC server, this script
 receives a 'CAPTURE' command sent from the CPE controller app to inform this
 OVOC server of which CPE traffic should be filtered and captured using
-'tcpdump'. This OVOC capture app script responds with a 'TRYING' when setting
-up the tcpdump, and an 'OK' when the tcpdump process is running. The response
-will be 'FAIL' if the capture fails to be started. The captures
-are stopped on this OVOC server after the CPE controller app script
-'cpe_capture_app.py' receives the 'Connection Lost' SNMP alarm. That CPE app
-script will send a 'STOP' command to the appropriate OVOC server app that 
-will trigger this script to kill the tcpdump process for that CPE device.
+'tcpdump'. This OVOC capture app script responds with a '100 Trying' when 
+setting up the tcpdump, and a '200 OK' when the tcpdump process is running.
+The response will be '503 Service Unavailable' if the capture fails to be
+started. The captures are stopped on this OVOC server after the CPE 
+controller app script 'cpe_capture_app.py' receives the 'Connection Lost'
+SNMP alarm. That CPE app script will send a 'STOP' command to the appropriate
+OVOC server app that will trigger this script to kill the tcpdump process for
+that CPE device.
+
 The following messages are exchanged:
 
 
@@ -62,16 +64,22 @@ The following messages are exchanged:
        |                                           |
        |-------- CAPTURE <device address> -------->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
        |---- STOP <device address> <filename> ---->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
+
+If this script receives a request and the device address is not found in the
+devices information dictionary, then a '404 Not Found' is returned.
+
+If the capture fails to be started or fails to stop, then the response will
+be a '503 Service Unavailable'.
 
 This script tracks capture states, all tasks, and other information for each
 targeted CPE device. The 'devices_info' dictionary is created to track each
@@ -434,9 +442,9 @@ def send_cli_script(logger, log_id, script, device, username, password):
     return task_info
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: send_cmd_response                                                 #
+# FUNCTION: send_response                                                     #
 #                                                                             #
-# Send a command response to a CPE capture app script.                        #
+# Send a response to a CPE capture app script.                                #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger     - File handler for storing logged actions                    #
@@ -448,8 +456,8 @@ def send_cli_script(logger, log_id, script, device, username, password):
 # Return:                                                                     #
 #    status - Boolean: 'True' for success, 'False' for failure                #
 # --------------------------------------------------------------------------- #
-def send_cmd_response(logger, log_id, udp_socket, response, address):
-    """Send a command response to a CPE capture app script."""
+def send_response(logger, log_id, udp_socket, response, address):
+    """Send a response to a CPE capture app script."""
 
     status = False
 
@@ -2070,12 +2078,7 @@ def main(argv):
     # Get parameters via interactive input #
     # ------------------------------------ #
     try:
-        # -------------------------------------------------------- #
-        # Disabled interactively setting 'listen_port'.            #
-        # To enable, switch the comments on the following 2 lines. #
-        # -------------------------------------------------------- #
         listen_port = get_listen_port(logger, log_id)
-        #listen_port = config.listen_port
         prevent_shutdown = get_prevent_shutdown(logger, log_id)
         interface_name = get_interface_name(logger, log_id)
 
@@ -2166,16 +2169,16 @@ def main(argv):
                     # ------------------------------------------------------ #
                     devices_info['devices'][device_index]['lastRequest'] = 'CAPTURE'
 
-                    # ----------------------------------------------- #
-                    # Send TRYING response to CPE capture app script. #
-                    # ----------------------------------------------- #
-                    this_response = 'TRYING {}'.format(target_device)
-                    response_type = 'TRYING'
-                    event = 'Sending [TRYING] response for starting capture for device: [{}]'.format(target_device)
+                    # --------------------------------------------------- #
+                    # Send 100 Trying response to CPE capture app script. #
+                    # --------------------------------------------------- #
+                    this_response = '100 Trying {}'.format(target_device)
+                    response_type = '100 Trying'
+                    event = 'Sending [100 Trying] response for starting capture for device: [{}]'.format(target_device)
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
-                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
-                        event = 'Successfully sent response for starting capture on OVOC server.'
+                    if send_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Sent response for starting capture on OVOC server.'
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
 
@@ -2221,20 +2224,20 @@ def main(argv):
                     devices_info = start_capture(logger, log_id, target_device, interface_name, devices_info)
 
                     if devices_info['devices'][device_index]['state'].lower() == 'active':
-                        # ------------------------------------------- #
-                        # Send OK response to CPE capture app script. #
-                        # ------------------------------------------- #
-                        this_response = 'OK {}'.format(target_device)
-                        response_type = 'OK'
+                        # ----------------------------------------------- #
+                        # Send 200 OK response to CPE capture app script. #
+                        # ----------------------------------------------- #
+                        this_response = '200 OK {}'.format(target_device)
+                        response_type = '200 OK'
                     else:
-                        this_response = 'FAIL {}'.format(target_device)
-                        response_type = 'FAIL'
+                        this_response = '503 Service Unavailable {}'.format(target_device)
+                        response_type = '503 Service Unavailable'
 
                     event = 'Sending response for starting capture on OVOC server: [{}]'.format(this_response)
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
-                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
-                        event = 'Successfully sent response for starting capture on OVOC server.'
+                    if send_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Sent response for starting capture on OVOC server.'
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
 
@@ -2261,16 +2264,16 @@ def main(argv):
                     devices_info['devices'][device_index]['lastRequest'] = 'STOP'
                     devices_info['devices'][device_index]['cpeCapture'] = msg_info['filename']
 
-                    # ----------------------------------------------- #
-                    # Send TRYING response to CPE capture app script. #
-                    # ----------------------------------------------- #
-                    this_response = 'TRYING {}'.format(target_device)
-                    response_type = 'TRYING'
-                    event = 'Sending [TRYING] response for stopping capture for device: [{}]'.format(target_device)
+                    # --------------------------------------------------- #
+                    # Send 100 Trying response to CPE capture app script. #
+                    # --------------------------------------------------- #
+                    this_response = '100 Trying {}'.format(target_device)
+                    response_type = '100 Trying'
+                    event = 'Sending [100 Trying] response for stopping capture for device: [{}]'.format(target_device)
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
-                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
-                        event = 'Successfully sent response for stopping capture on OVOC server.'
+                    if send_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Sent response for stopping capture on OVOC server.'
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
 
@@ -2291,20 +2294,20 @@ def main(argv):
                     devices_info = stop_capture(logger, log_id, target_device, msg_info['filename'], devices_info)
 
                     if devices_info['devices'][device_index]['state'].lower() == 'not active':
-                        # ------------------------------------------- #
-                        # Send OK response to CPE capture app script. #
-                        # ------------------------------------------- #
-                        this_response = 'OK {}'.format(target_device)
-                        response_type = 'OK'
+                        # ----------------------------------------------- #
+                        # Send 200 OK response to CPE capture app script. #
+                        # ----------------------------------------------- #
+                        this_response = '200 OK {}'.format(target_device)
+                        response_type = '200 OK'
                     else:
-                        this_response = 'FAIL {}'.format(target_device)
-                        response_type = 'FAIL'
+                        this_response = '503 Service Unavailable {}'.format(target_device)
+                        response_type = '503 Service Unavailable'
 
                     event = 'Sending response for stopping capture on OVOC server: [{}]'.format(this_response)
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
-                    if send_cmd_response(logger, log_id, udp_server_socket, this_response, from_address):
-                        event = 'Successfully sent response for stopping capture on OVOC server.'
+                    if send_response(logger, log_id, udp_server_socket, this_response, from_address):
+                        event = 'Sent response for stopping capture on OVOC server.'
                         logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
 
