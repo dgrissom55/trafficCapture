@@ -50,7 +50,7 @@ ovoc_listen_port = 20001
 # not perform any captures for the current session.                   #
 # NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
-max_reg_attempts = 5
+max_reg_attempts = 2
 
 # ------------------------------------------------------------------- #
 # Max retries for failed REST API requests.                           #

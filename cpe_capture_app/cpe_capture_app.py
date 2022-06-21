@@ -84,7 +84,7 @@ devices information. The following is an example of what is tracked:
              "registerAttempts": <some value>,
              "completed": True|False,
              "status": "Success|Failure",
-             "deviceCapture": "active|not active",
+             "cpeCapture": "active|not active",
              "events": "Success|Failure",
              "ovocCapture": "active|not active",
              "description": "<some description>",
@@ -753,7 +753,7 @@ def get_cpe_devices(logger, log_id):
     #             "username": "<device REST API username>",               #
     #             "password": "<device REST API password>",               #
     #             "completed": False,                                     #
-    #             "deviceCapture": "not active",                          #
+    #             "cpeCapture": "not active",                             #
     #             "registration": "not active",                           #
     #             "registerAttempts": 0,                                  #
     #             "ovoc": "<ovoc address>",                               #
@@ -1125,11 +1125,11 @@ def get_cpe_devices(logger, log_id):
                 devices_info['devices'][device_index]['completed'] = False
                 devices_info['devices'][device_index]['tasks'] = []
 
-                # ------------------------------------------------------- #
-                # Default 'deviceCapture' to 'not active' to indicate the #
-                # device isn't currently performing a network capture.    #
-                # ------------------------------------------------------- #
-                devices_info['devices'][device_index]['deviceCapture'] = 'not active'
+                # ---------------------------------------------------- #
+                # Default 'cpeCapture' to 'not active' to indicate the #
+                # device isn't currently performing a network capture. #
+                # ---------------------------------------------------- #
+                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
 
                 # --------------------------------------------------------- #
                 # Default 'ovocCapture' to 'not active' to indicate the     #
@@ -1368,11 +1368,11 @@ def get_cpe_devices(logger, log_id):
             devices_info['devices'][device_index]['completed'] = False
             devices_info['devices'][device_index]['tasks'] = []
 
-            # ------------------------------------------------------- #
-            # Default 'deviceCapture' to 'not active' to indicate the #
-            # device isn't currently performing a network capture.    #
-            # ------------------------------------------------------- #
-            devices_info['devices'][device_index]['deviceCapture'] = 'not active'
+            # ---------------------------------------------------- #
+            # Default 'cpeCapture' to 'not active' to indicate the #
+            # device isn't currently performing a network capture. #
+            # ---------------------------------------------------- #
+            devices_info['devices'][device_index]['cpeCapture'] = 'not active'
 
             # --------------------------------------------------------- #
             # Default 'ovocCapture' to 'not active' to indicate the     #
@@ -2239,7 +2239,7 @@ def start_captures(logger, log_id, server_socket, devices_info):
             # -------------------------------- #
             devices_info = start_capture(logger, log_id, this_device_address, devices_info)
 
-            if devices['deviceCapture'] == 'active':
+            if devices['cpeCapture'] == 'active':
 
                 # ------------------------------------------------------- #
                 # Send CAPTURE command to OVOC capture app script to      #
@@ -2438,10 +2438,10 @@ debug capture voip physical show
             devices_info['devices'][device_index]['description'] = last_description
 
             if started:
-                devices_info['devices'][device_index]['deviceCapture'] = 'active'
+                devices_info['devices'][device_index]['cpeCapture'] = 'active'
                 devices_info['devices'][device_index]['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['deviceCapture'] = 'not active'
+                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
                 devices_info['devices'][device_index]['severity'] = 'CRITICAL'
 
             break
@@ -2615,10 +2615,10 @@ debug capture voip physical show
             devices_info['devices'][device_index]['description'] = last_description
 
             if stopped:
-                devices_info['devices'][device_index]['deviceCapture'] = 'not active'
+                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
                 devices_info['devices'][device_index]['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['deviceCapture'] = 'active'
+                devices_info['devices'][device_index]['cpeCapture'] = 'active'
                 devices_info['devices'][device_index]['severity'] = 'MAJOR'
 
         device_index += 1
@@ -2672,7 +2672,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
 
             retrieved = False
 
-            if this_device['deviceCapture'].lower() == 'not active':
+            if this_device['cpeCapture'].lower() == 'not active':
 
                 print('Retrieving network traffic capture from CPE device #{}: [{}]'.format(device_index + 1, this_device_address))
 
@@ -2880,7 +2880,7 @@ def parse_message(logger, log_id, message):
             msg_info['ipAddress'] = match.group(1).strip()
 
     # ------------------------------------------------- #
-    # Match and response beginning with a response code #
+    # Match any response beginning with a response code #
     # followed by response text.                        #
     # ------------------------------------------------- #
     elif re.search('^\d+\s+\w+', message):
