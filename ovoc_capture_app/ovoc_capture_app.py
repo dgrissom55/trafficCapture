@@ -156,7 +156,7 @@ try:
         os.makedirs(config.storage_dir)
         print('Log directory [{}] created successfully.'.format(config.storage_dir))
 except OSError as error:
-    print('Log directory [{}] can not be created!'.format(config.storage_dir))
+    print('ERROR: Log directory [{}] can not be created!'.format(config.storage_dir))
     exit(1)
 app_log_level = config.app_log_level
 app_log_file = config.storage_dir + '/' + config.app_log_file
@@ -304,56 +304,146 @@ def rotate_logs(logger, log_id, log_file, max_size, archived_files):
     return status
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: send_cli_script                                                   #
+# FUNCTION: send_rest                                                         #
 #                                                                             #
-# Submit a REST API request to a device to execute the desired CLI script.    #
+# Send REST API request to server and return response.                        #
 #                                                                             #
 # Parameters:                                                                 #
-#     logger   - File handler for storing logged actions                      #
-#     log_id   - Unique identifier for this devices log entries               #
-#     script   - CLI script to execute on device in TEXT format               #
-#     device   - Address of CPE device to run script on                       #
-#     username - Username for account on CPE device                           #
-#     password - Password for account on CPE device                           #
+#    method    - HTML method type: GET, PUT, or POST                          #
+#    url       - Location to send REST request                                #
+#    username  - Username for REST authentication on OVOC server              #
+#    password  - Password for REST authentication on OVOC server              #
+#    data      - data formatted according to 'data_type' to send to           #
+#                OVOC server                                                  #
+#    data_type - Type of data in the 'data' parameter.                        #
+#                Either: 'files' or 'json'                                    #
+#                    'files' sends 'Content-Type: multipart/form-data'        #
+#                    'json'  sends 'Content-Type: application/json'           #
+#                                                                             #
+# Return:                                                                     #
+#    response - HTML Response Object that contains elements with the          #
+#               'status code' and response 'text' from OVOC server            #
+# --------------------------------------------------------------------------- #
+def send_rest(method, url, username, password, data=None, data_type='json'):
+    """Send REST API request to server and return response."""
+
+    # ----------------------------- #
+    # Set with Basic Authentication #
+    # ----------------------------- #
+    pwd = username + ':' + password
+    headers = {'Authorization': 'Basic ' + base64.b64encode(pwd.encode('utf-8', 'ignore')).decode('utf-8', 'ignore')}
+
+    # ------------------------------------------ #
+    # Send REST request based on the method type #
+    # ------------------------------------------ #
+    try:
+        if method == 'GET':
+            response = requests.get(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+        elif method == 'POST':
+            if data_type == 'json':
+                response = requests.post(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+            elif data_type == 'files':
+                response = requests.post(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+        elif method == 'PUT':
+            if data_type == 'json':
+                response = requests.put(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+            elif data_type == 'files':
+                response = requests.put(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+        elif method == 'DELETE':
+            response = requests.delete(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+
+    except Exception as err:
+        response = str(err)
+
+    return response
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: get_address_type                                                  #
+#                                                                             #
+# Check is address is a valid IPv4, IPv6, or FQDN.                            #
+#                                                                             #
+# Parameters:                                                                 #
+#     address - IPv4, IPv6, or FQDN address                                   #
+#                                                                             #
+# Return:                                                                     #
+#     address_type - String: 'ipv4', 'ipv6', or 'fqdn'                        #
+# --------------------------------------------------------------------------- #
+def get_address_type(address):
+    """Check for type of address, either IPv4, IPv6, or FQDN."""
+
+    address_type = 'unknown'
+
+    # ----------------- #
+    # Check IPv4 format #
+    # ----------------- #
+    if re.match('^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', address):
+        address_type = 'ipv4'
+
+    if address_type == 'unknown':
+        # ----------------- #
+        # Check IPv6 format #
+        # ----------------- #
+        if re.match('^((?=.*::)(?!.*::.+::)(::)?([\dA-F]{1,4}:(:|\b)|){5}|([\dA-F]{1,4}:){6})((([\dA-F]{1,4}((?!\3)::|:\b|$))|(?!\2\3)){2}|(((2[0-4]|1\d|[1-9])?\d|25[0-5])\.?\b){4})$', address):
+            address_type = 'ipv6'
+
+    if address_type == 'unknown':
+        # ----------------- #
+        # Check FQDN format #
+        # ----------------- #
+        if re.match('^(?=.{1,254}$)((?=[a-z0-9-]{1,63}\.)(xn--+)?[a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,63}$', address):
+            address_type = 'fqdn'
+
+    return address_type
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: get_device_id                                                     #
+#                                                                             #
+# Submit a REST API query to get the ID of a device managed by this OVOC      # 
+# server.                                                                     #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger        - File handler for storing logged actions                 #
+#     log_id        - Unique identifier for this devices log entries          #
+#     target_device - CPE device stored on OVOC server                        #
+#     credentials   - Credentials for REST API account on OVOC server         #
 #                                                                             #
 # Return:                                                                     #
 #    task_info - Dictionary containing the following items:                   #
 #        status      - String: 'Success' or 'Fail'                            #
 #        statusCode  - Integer: REST response status code. (Ex: 200)          #
-#        output      - Detailed information of execution of CLI script        #
+#        deviceId    - Integer: -1 for not found, >= 0 for ID of device       #
 #        description - String: Description of the task action                 #
 # --------------------------------------------------------------------------- #
-def send_cli_script(logger, log_id, script, device, username, password):
-    """Submit REST API PUT request to execute CLI script on device."""
+def get_device_id(logger, log_id, target_device, credentials):
+    """Get ID of device managed by OVOC server."""
 
     # ------------------------------------------- #
     # Create a dictionary to hold the relevant    #
     # information to return for the current task. #
     # ------------------------------------------- #
     task_info = {}
-    task_info['status'] = 'Failure'
+    task_info['task'] = 'Check for Device'
+    task_info['status'] = 'Fail'
     task_info['statusCode'] = -1
-    task_info['output'] = ''
+    task_info['deviceId'] = -1
     task_info['description'] = ''
-
-    # -------------------------------------------------------- #
-    # The body of the REST API request is made up of the plain #
-    # text file part.                                          #
-    # -------------------------------------------------------- #
-    file_contents = {'file': ('cli.txt', script)}
 
     # ---------------- #
     # Set REST API URL #
     # ---------------- #
-    url = "https://" + device + "/api/v1/files/cliScript/incremental"
+    address_type = get_address_type(target_device)
+    if address_type == 'fqdn':
+        url = "https://127.0.0.1/ovoc/v1/topology/devices?detail=1&filter=(fqdn='" + target_device + "')"
+    else:
+        url = "https://127.0.0.1/ovoc/v1/topology/devices?detail=1&filter=(ipAddress='" + target_device + "')"
 
-    event = 'Method [PUT] - Request URL: {}'.format(url)
+    event = 'Method [GET]" - Request URL: {}'.format(url)
     logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
     # Send REST request to OVOC server #
     # -------------------------------- #
-    rest_response = send_rest('PUT', url, username, password, file_contents, 'files')
+    rest_response = send_rest('GET', url, credentials['username'], credentials['password'])
     rest_response_data = ''
     if type(rest_response) is str:
         rest_response_data = rest_response
@@ -365,8 +455,8 @@ def send_cli_script(logger, log_id, script, device, username, password):
         # ------------- #
         task_info['description'] = event
 
-        event = 'REST request failed. Could not send CLI script to device.'
-        logger.error('{} - {}'.format(log_id, event))
+        event = 'REST request failed. Could not verify if CPE device is on OVOC server.'
+        logger.warning('{} - {}'.format(log_id, event))
     else:
         if 'Content-Type' in rest_response.headers:
             if re.search('application/json', rest_response.headers['Content-Type']):
@@ -385,61 +475,724 @@ def send_cli_script(logger, log_id, script, device, username, password):
             logger.info('{} - {}'.format(log_id, event))
 
         if rest_response.status_code == 200:
-            # --------------------------------------- #
-            # Status Code 200 - CLI script was loaded #
-            # --------------------------------------- #
-            if 'status' in rest_response_data:
-                if rest_response_data['status'].lower() == 'success':
+            # ---------------------------------------------- #
+            # Status Code 200 - Device exists on OVOC server #
+            # ---------------------------------------------- #
+            if 'devices' in rest_response_data:
 
-                    # ------------------------------------------ #
-                    # Successfully executed CLI script on device #
-                    # ------------------------------------------ #
-                    event = 'Successfully executed CLI script on device.'
-                    logger.info('{} - {}'.format(log_id, event))
-
-                else:
-
-                    # ------------------------------------- #
-                    # CLI script execution failed on device #
-                    # ------------------------------------- #
-                    event = 'CLI script execution failed on device.'
-                    logger.error('{} - {}'.format(log_id, event))
+                # --------------------------- #
+                # Get the device id from OVOC #
+                # --------------------------- #
+                event = 'CPE device exists on OVOC server'
+                logger.info('{} - {}'.format(log_id, event))
 
                 # ------------- #
                 # Set task info #
                 # ------------- #
-                task_info['status'] = rest_response_data['status'].capitalize()
+                task_info['status'] = 'Success'
                 task_info['statusCode'] = rest_response.status_code
-                task_info['output'] = rest_response_data['output']
+                task_info['deviceId'] = rest_response_data['devices'][0]['id']
                 task_info['description'] = event
 
             else:
-                event = 'Response status was 200, but unable to extract CLI execution status!'
+                event = 'Could not get CPE device ID from OVOC server'
                 logger.warning('{} - {}'.format(log_id, event))
 
                 # ------------- #
                 # Set task info #
                 # ------------- #
                 task_info['description'] = event
-
         else:
-            # ---------------------------------------------- #
-            # REST request to this device was not successful #
-            # ---------------------------------------------- #
+            # --------------------------------------------------- #
+            # Get ID of CPE device from server was not successful #
+            # --------------------------------------------------- #
             if 'description' in rest_response_data:
                 event = '{}'.format(rest_response_data['description'])
-                logger.error('{} - {}'.format(log_id, event))
+                logger.warning('{} - {}'.format(log_id, event))
             else:
-                event = 'Unexpected response received from device. Status code: [{}]'.format(rest_response.status_code)
-                logger.error('{} - {}'.format(log_id, event))
+                event = 'Failed to get CPE device ID from OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
 
             # ------------- #
             # Set task info #
             # ------------- #
-            task_info['status_code'] = rest_response.status_code
+            task_info['statusCode'] = rest_response.status_code
             task_info['description'] = event
 
     return task_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: get_fwd_rule_id                                                   #
+#                                                                             #
+# Submit a REST API query to get the ID of a SNMP alarm forwarding rule that  #
+# is defined on this OVOC server.                                             #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger      - File handler for storing logged actions                   #
+#     log_id      - Unique identifier for this devices log entries            #
+#     rule_name   - SNMP alarm forwarding rule on this OVOC server            #
+#     credentials - Credentials for REST API account on OVOC server           #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following items:                   #
+#        status      - String: 'Success' or 'Fail'                            #
+#        statusCode  - Integer: REST response status code. (Ex: 200)          #
+#        ruleId      - Integer: -1 for not found, >= 0 for ID of alarm rule   #
+#        description - String: Description of the task action                 #
+# --------------------------------------------------------------------------- #
+def get_fwd_rule_id(logger, log_id, rule_name, credentials):
+    """Get ID of a SNMP alarm forwarding rule defined on OVOC server."""
+
+    # ------------------------------------------- #
+    # Create a dictionary to hold the relevant    #
+    # information to return for the current task. #
+    # ------------------------------------------- #
+    task_info = {}
+    task_info['task'] = 'Check for Alarm Forwarding Rule'
+    task_info['status'] = 'Fail'
+    task_info['statusCode'] = -1
+    task_info['ruleId'] = -1
+    task_info['description'] = ''
+
+    # ---------------- #
+    # Set REST API URL #
+    # ---------------- #
+    url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules?detail=1&filter=(name='" + rule_name + "')"
+
+    event = 'Method [GET]" - Request URL: {}'.format(url)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # -------------------------------- #
+    # Send REST request to OVOC server #
+    # -------------------------------- #
+    rest_response = send_rest('GET', url, credentials['username'], credentials['password'])
+    rest_response_data = ''
+    if type(rest_response) is str:
+        rest_response_data = rest_response
+        event = 'REST Request Error: {}'.format(rest_response_data)
+        logger.error('{} - {}'.format(log_id, event))
+
+        # ------------- #
+        # Set task info #
+        # ------------- #
+        task_info['description'] = event
+
+        event = 'REST request failed. Could not verify if SNMP alarm forwarding rule is on OVOC server.'
+        logger.warning('{} - {}'.format(log_id, event))
+    else:
+        if 'Content-Type' in rest_response.headers:
+            if re.search('application/json', rest_response.headers['Content-Type']):
+                rest_response_data = {}
+                if len(rest_response.text) > 0:
+                    rest_response_data = json.loads(rest_response.text)
+                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                rest_response_data = rest_response.text
+                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
+                logger.info('{} - {}'.format(log_id, event))
+        else:
+            rest_response_data = rest_response.text
+            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
+            logger.info('{} - {}'.format(log_id, event))
+
+        if rest_response.status_code == 200:
+            # ------------------------------------------------------- #
+            # Status Code 200 - Forwarding rule exists on OVOC server #
+            # ------------------------------------------------------- #
+            if 'fwdRules' in rest_response_data:
+
+                # ------------------------- #
+                # Get the rule id from OVOC #
+                # ------------------------- #
+                event = 'SNMP alarm forwarding rule exists on OVOC server'
+                logger.info('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['status'] = 'Success'
+                task_info['statusCode'] = rest_response.status_code
+                task_info['ruleId'] = rest_response_data['fwdRules'][0]['id']
+                task_info['description'] = event
+
+            else:
+                event = 'Could not get SNMP alarm forwarding rule ID from OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['description'] = event
+        else:
+            # --------------------------------------------------- #
+            # Get ID of CPE device from server was not successful #
+            # --------------------------------------------------- #
+            if 'description' in rest_response_data:
+                event = '{}'.format(rest_response_data['description'])
+                logger.warning('{} - {}'.format(log_id, event))
+            else:
+                event = 'Failed to get SNMP alarm forwarding rule ID from OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+    return task_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: update_fwd_rule                                                   #
+#                                                                             #
+# Submit a REST API request to update the settings of a SNMP alarm forwarding #
+# rule that has been defined on this OVOC server.                             #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger      - File handler for storing logged actions                   #
+#     log_id      - Unique identifier for this devices log entries            #
+#     rule_id     - ID of SNMP alarm forwarding rule on this OVOC server      #
+#     device_id   - ID of CPE device that alarm will be forwarded for         #
+#                       (-1 for all devices)                                  #
+#     address     - IP address to send forwarded alarm to                     #
+#     port        - IP port to send forwarded alarm to                        #
+#     alarm_list  - List of alarms to forward                                 #
+#                       (Refer to the OVOC Alarms Monitoring Guide for the    #
+#                        exact value of the alarm name. For instance, the     #
+#                        'Connection Alarm' use the SNMP name                 #
+#                        'acEMSNodeConnectionLostAlarm' for the value needed  #
+#                        in the OVOC alarm rule.)                             #
+#     credentials - Credentials for REST API account on OVOC server           #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following items:                   #
+#        status      - String: 'Success' or 'Fail'                            #
+#        statusCode  - Integer: REST response status code. (Ex: 200)          #
+#        description - String: Description of the task action                 #
+# --------------------------------------------------------------------------- #
+def update_fwd_rule(logger, log_id, rule_id, device_id, address, port, alarm_list, credentials):
+    """Update settings of a SNMP alarm forwarding rule defined on OVOC server."""
+
+    # ------------------------------------------- #
+    # Create a dictionary to hold the relevant    #
+    # information to return for the current task. #
+    # ------------------------------------------- #
+    task_info = {}
+    task_info['task'] = 'Update Alarm Forwarding Rule'
+    task_info['status'] = 'Fail'
+    task_info['statusCode'] = -1
+    task_info['description'] = ''
+
+    # -------------------------------- #
+    # The body of the REST API request #
+    # -------------------------------- #
+    request_body = {}
+    request_body['destSyslog'] = {}
+    request_body['destSyslog']['syslogServerIP'] = address
+    request_body['destSyslog']['syslogServerPort'] = port
+
+    if device_id == -1:
+        request_body['alarmTenantsFilter'] = None
+        request_body['alarmRegionsFilter'] = None
+        request_body['alarmEndpointsFilter'] = None
+        request_body['alarmSitesFilter'] = None
+        request_body['alarmDevicesFilter'] = None
+    else:
+        request_body['alarmTenantsFilter'] = None
+        request_body['alarmRegionsFilter'] = None
+        request_body['alarmEndpointsFilter'] = None
+        request_body['alarmSitesFilter'] = None
+        request_body['alarmDevicesFilter'] = []
+        request_body['alarmDevicesFilter'].append(device_id)
+
+    if len(alarm_list) > 0:
+        request_body['alarmNamesFilter'] = alarm_list
+    else:
+        request_body['alarmNamesFilter'] = None
+
+    request_body = json.dumps(request_body, indent=4)
+    event = 'REST API Request Body:\n{}'.format(request_body)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # ---------------- #
+    # Set REST API URL #
+    # ---------------- #
+    url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules/" + str(rule_id)
+
+    event = 'Method [PUT]" - Request URL: {}'.format(url)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # -------------------------------- #
+    # Send REST request to OVOC server #
+    # -------------------------------- #
+    rest_response = send_rest('PUT', url, credentials['username'], credentials['password'], request_body)
+    rest_response_data = ''
+    if type(rest_response) is str:
+        rest_response_data = rest_response
+        event = 'REST Request Error: {}'.format(rest_response_data)
+        logger.error('{} - {}'.format(log_id, event))
+
+        # ------------- #
+        # Set task info #
+        # ------------- #
+        task_info['description'] = event
+
+        event = 'REST request failed. Could not update SNMP alarm forwarding rule on OVOC server.'
+        logger.warning('{} - {}'.format(log_id, event))
+    else:
+        if 'Content-Type' in rest_response.headers:
+            if re.search('application/json', rest_response.headers['Content-Type']):
+                rest_response_data = {}
+                if len(rest_response.text) > 0:
+                    rest_response_data = json.loads(rest_response.text)
+                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                rest_response_data = rest_response.text
+                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
+                logger.info('{} - {}'.format(log_id, event))
+        else:
+            rest_response_data = rest_response.text
+            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
+            logger.info('{} - {}'.format(log_id, event))
+
+        if rest_response.status_code == 200:
+            # --------------------------------------------------------------------- #
+            # Status Code 200 - Successfully updated forwarding rule on OVOC server #
+            # --------------------------------------------------------------------- #
+            event = 'Successfully updated SNMP alarm forwarding rule on OVOC server'
+            logger.info('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['status'] = 'Success'
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+        else:
+            # ------------------------------------------- #
+            # Update of rule on server was not successful #
+            # ------------------------------------------- #
+            if 'description' in rest_response_data:
+                event = '{}'.format(rest_response_data['description'])
+                logger.warning('{} - {}'.format(log_id, event))
+            else:
+                event = 'Failed to update SNMP alarm forwarding rule on OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+    return task_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: create_fwd_rule                                                   #
+#                                                                             #
+# Submit a REST API request to create a new SNMP alarm forwarding rule on     #
+# this OVOC server.                                                           #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger      - File handler for storing logged actions                   #
+#     log_id      - Unique identifier for this devices log entries            #
+#     rule_name   - Unique and descriptive name for this forwarding rule      #
+#     device_id   - ID of CPE device that alarm will be forwarded for         #
+#                       (-1 for all devices)                                  #
+#     address     - IP address to send forwarded alarm to                     #
+#     port        - IP port to send forwarded alarm to                        #
+#     alarm_list  - List of alarms to forward                                 #
+#                       (Refer to the OVOC Alarms Monitoring Guide for the    #
+#                        exact value of the alarm name. For instance, the     #
+#                        'Connection Alarm' use the SNMP name                 #
+#                        'acEMSNodeConnectionLostAlarm' for the value needed  #
+#                        in the OVOC alarm rule.)                             #
+#     credentials - Credentials for REST API account on OVOC server           #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following items:                   #
+#        status      - String: 'Success' or 'Fail'                            #
+#        statusCode  - Integer: REST response status code. (Ex: 200)          #
+#        description - String: Description of the task action                 #
+# --------------------------------------------------------------------------- #
+def create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_list, credentials):
+    """Create a new SNMP alarm forwarding rule on OVOC server."""
+
+    # ------------------------------------------- #
+    # Create a dictionary to hold the relevant    #
+    # information to return for the current task. #
+    # ------------------------------------------- #
+    task_info = {}
+    task_info['task'] = 'Create Alarm Forwarding Rule'
+    task_info['status'] = 'Fail'
+    task_info['statusCode'] = -1
+    task_info['description'] = ''
+
+    # -------------------------------- #
+    # The body of the REST API request #
+    # -------------------------------- #
+    request_body = {}
+    request_body['ruleDestType'] = 'SYSLOG'
+    request_body['destSyslog'] = {}
+    request_body['destSyslog']['syslogServerIP'] = address
+    request_body['destSyslog']['syslogServerPort'] = port
+    request_body['forwardType'] = 'ALLOW'
+    request_body['name'] = rule_name
+    request_body['tenantId'] = -1
+    
+    if device_id == -1:
+        request_body['alarmTenantsFilter'] = None
+        request_body['alarmRegionsFilter'] = None
+        request_body['alarmEndpointsFilter'] = None
+        request_body['alarmSitesFilter'] = None
+        request_body['alarmDevicesFilter'] = None
+    else:
+        request_body['alarmTenantsFilter'] = None
+        request_body['alarmRegionsFilter'] = None
+        request_body['alarmEndpointsFilter'] = None
+        request_body['alarmSitesFilter'] = None
+        request_body['alarmDevicesFilter'] = []
+        request_body['alarmDevicesFilter'].append(device_id)
+
+    if len(alarm_list) > 0:
+        request_body['alarmNamesFilter'] = alarm_list
+    else:
+        request_body['alarmNamesFilter'] = None
+
+    request_body = json.dumps(request_body, indent=4)
+    event = 'REST API Request Body:\n{}'.format(request_body)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # ---------------- #
+    # Set REST API URL #
+    # ---------------- #
+    url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules"
+
+    event = 'Method [POST]" - Request URL: {}'.format(url)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # -------------------------------- #
+    # Send REST request to OVOC server #
+    # -------------------------------- #
+    rest_response = send_rest('POST', url, credentials['username'], credentials['password'], request_body)
+    rest_response_data = ''
+    if type(rest_response) is str:
+        rest_response_data = rest_response
+        event = 'REST Request Error: {}'.format(rest_response_data)
+        logger.error('{} - {}'.format(log_id, event))
+
+        # ------------- #
+        # Set task info #
+        # ------------- #
+        task_info['description'] = event
+
+        event = 'REST request failed. Could not create SNMP alarm forwarding rule on OVOC server.'
+        logger.warning('{} - {}'.format(log_id, event))
+    else:
+        if 'Content-Type' in rest_response.headers:
+            if re.search('application/json', rest_response.headers['Content-Type']):
+                rest_response_data = {}
+                if len(rest_response.text) > 0:
+                    rest_response_data = json.loads(rest_response.text)
+                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                rest_response_data = rest_response.text
+                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
+                logger.info('{} - {}'.format(log_id, event))
+        else:
+            rest_response_data = rest_response.text
+            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
+            logger.info('{} - {}'.format(log_id, event))
+
+        if rest_response.status_code == 201:
+            # --------------------------------------------------------------------- #
+            # Status Code 201 - Successfully created forwarding rule on OVOC server #
+            # --------------------------------------------------------------------- #
+            if 'id' in rest_response_data:
+
+                # ------------------------- #
+                # Get the rule id from OVOC #
+                # ------------------------- #
+                event = 'Successfully created SNMP alarm forwarding rule on OVOC server'
+                logger.info('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['status'] = 'Success'
+                task_info['statusCode'] = rest_response.status_code
+                task_info['ruleId'] = rest_response_data['id']
+                task_info['description'] = event
+
+            else:
+                event = 'Could not get new SNMP alarm forwarding rule ID from OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['description'] = event
+        else:
+            # ------------------------------------------- #
+            # Update of rule on server was not successful #
+            # ------------------------------------------- #
+            if 'description' in rest_response_data:
+                event = '{}'.format(rest_response_data['description'])
+                logger.warning('{} - {}'.format(log_id, event))
+            else:
+                event = 'Failed to create SNMP alarm forwarding rule on OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+    return task_info
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: set_alarm_fwd_rule                                                #
+#                                                                             #
+# Check to see  API request to create a new SNMP alarm forwarding rule on     #
+# this OVOC server.                                                           #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     target_device  - CPE device to create an alarm forwarded rule for       #
+#                       ("" for all devices)                                  #
+#     rule_name      - Unique and descriptive name for this forwarding rule   #
+#     alarm_list     - List of alarms to forward                              #
+#                       (Refer to the OVOC Alarms Monitoring Guide for the    #
+#                        exact value of the alarm name. For instance, the     #
+#                        'Connection Alarm' use the SNMP name                 #
+#                        'acEMSNodeConnectionLostAlarm' for the value needed  #
+#                        in the OVOC alarm rule.)                             #
+#     sendto_address - Tuple of address/port of CPE capture app to send resp  #
+#     credentials    - Credentials for REST API account on OVOC server        #
+#     devices_info   - Dictionary of targeted devices                         #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
+    """Set SNMP alarm forwarding rule on OVOC server."""
+
+    address = sendto_address[0]
+    port = sendto_address[1]
+
+    # ------------------------------------------ #
+    # If setting up a global forwarding rule not #
+    # associated with any targted devices.       #
+    # ------------------------------------------ #
+    if target_device == '':
+
+        device_id = -1
+        get_fwd_rule_task = get_fwd_rule_id(logger, log_id, rule_name, credentials)
+
+        # ---------------------------- #
+        # Create new rule if not found #
+        # ---------------------------- #
+        if get_fwd_rule_task['ruleId'] == -1:
+
+            event = 'Creating global SNMP alarm forwarding rule: [{}]'.format(rule_name)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+            create_fwd_rule_task = create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_list, credentials)
+
+            event = create_fwd_rule_task['description']
+            if create_fwd_rule_task['status'].lower() == 'success':
+                print('  + INFO: {}'.format(event))
+            else:
+                print('  + CRITICAL: {}'.format(event))
+
+        # -------------------- #
+        # Update existing rule #
+        # -------------------- #
+        else:
+
+            event = 'Updating global SNMP alarm forwarding rule: [{}]'.format(rule_name)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+            update_fwd_rule_task = update_fwd_rule(logger, log_id, get_fwd_rule_task['ruleId'], device_id, address, port, alarm_list, credentials)
+
+            event = update_fwd_rule_task['description']
+            if update_fwd_rule_task['status'].lower() == 'success':
+                print('  + INFO: {}'.format(event))
+            else:
+                print('  + WARNING: {}'.format(event))
+
+    # ------------------------------------------ #
+    # If setting up a device specific forwarding #
+    # rule associated with a targted devices.    #
+    # ------------------------------------------ #
+    else:
+        device_found = False
+        device_index = 0
+        for device in devices_info['devices']:
+            if device['device'] == target_device:
+
+                device_found = True
+                event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+                logger.debug('{} - {}'.format(log_id, event))
+
+                # ------------------------------------------------------- #
+                # Track information to summarize each devices info record #
+                # ------------------------------------------------------- #
+                device_status = ''
+                device_severity = ''
+                last_description = ''
+
+                event = 'Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, target_device)
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + {}'.format(event))
+
+                # --------------------------------------------------- #
+                # Check for device on OVOC and store task information #
+                # --------------------------------------------------- #
+                get_device_task = get_device_id(logger, log_id, target_device, credentials)
+                task_timestamp = datetime.now()
+                get_device_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                device['tasks'].append(get_device_task.copy())
+                device_status = get_device_task['status']
+                logger.debug('{} - {}'.format(log_id, device_status))
+                last_description = get_device_task['description']
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = get_device_task['description']
+                if device_status.lower() == 'success':
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
+                else:
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+
+                # -------------------------------------- #
+                # If device found, setup forwarding rule #
+                # -------------------------------------- #
+                if get_device_task['deviceId'] != -1:
+
+                    # --------------------------------------------------- #
+                    # Check for device SNMP alarm forwarding rule on OVOC #
+                    # and store task information.                         #
+                    # --------------------------------------------------- #
+                    get_fwd_rule_task = get_fwd_rule_id(logger, log_id, rule_name, credentials)
+                    task_timestamp = datetime.now()
+                    get_fwd_rule_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    device['tasks'].append(get_fwd_rule_task.copy())
+                    device_status = get_fwd_rule_task['status']
+                    logger.debug('{} - {}'.format(log_id, device_status))
+                    last_description = get_fwd_rule_task['description']
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    event = get_device_task['description']
+                    if device_status.lower() == 'success':
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
+                    else:
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+
+                    # ---------------------------- #
+                    # Create new rule if not found #
+                    # ---------------------------- #
+                    if get_fwd_rule_task['ruleId'] == -1:
+
+                        event = 'Creating SNMP alarm forwarding rule [{}] for device: [{}]'.format(rule_name, target_device)
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('  + {}'.format(event))
+
+                        create_fwd_rule_task = create_fwd_rule(logger, log_id, rule_name, get_device_task['deviceId'], address, port, alarm_list, credentials)
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        task_timestamp = datetime.now()
+                        create_fwd_rule_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                        device['tasks'].append(create_fwd_rule_task.copy())
+                        device_status = create_fwd_rule_task['status']
+                        logger.debug('{} - {}'.format(log_id, device_status))
+                        last_description = create_fwd_rule_task['description']
+
+                        # --------------- #
+                        # Display results #
+                        # --------------- #
+                        event = create_fwd_rule_task['description']
+                        if create_fwd_rule_task['status'].lower() == 'success':
+                            logger.info('{} - {}'.format(log_id, event))
+                            print('  + INFO: {}'.format(event))
+                        else:
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('  + CRITICAL: {}'.format(event))
+
+                    # -------------------- #
+                    # Update existing rule #
+                    # -------------------- #
+                    else:
+
+                        event = 'Updating global SNMP alarm forwarding rule: [{}]'.format(rule_name)
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('{}'.format(event))
+
+                        update_fwd_rule_task = update_fwd_rule(logger, log_id, get_fwd_rule_task['ruleId'], get_device_task['deviceId'], address, port, alarm_list, credentials)
+
+                        # ---------------------- #
+                        # Store task information #
+                        # ---------------------- #
+                        task_timestamp = datetime.now()
+                        update_fwd_rule_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                        device['tasks'].append(update_fwd_rule_task.copy())
+                        device_status = update_fwd_rule_task['status']
+                        logger.debug('{} - {}'.format(log_id, device_status))
+                        last_description = update_fwd_rule_task['description']
+
+                        # --------------- #
+                        # Display results #
+                        # --------------- #
+                        event = update_fwd_rule_task['description']
+                        if update_fwd_rule_task['status'].lower() == 'success':
+                            logger.info('{} - {}'.format(log_id, event))
+                            print('  + INFO: {}'.format(event))
+                        else:
+                            logger.error('{} - {}'.format(log_id, event))
+                            print('  + WARNING: {}'.format(event))
+
+                # -------------------------------------- #
+                # Store task information at device level #
+                # -------------------------------------- #
+                device['status'] = device_status
+                device['description'] = last_description
+                device['tempCapture'] = filename
+
+                if started:
+                    device['ovocCapture'] = 'active'
+                    device['severity'] = 'NORMAL'
+                else:
+                    device['ovocCapture'] = 'not active'
+                    device['severity'] = 'CRITICAL'
+
+                break
+
+            device_index += 1
+
+        if not device_found:
+            event = 'Device not found in monitored devices list!'
+            logger.error('{} - {}'.format(log_id, event))
+            print('  + ERROR: {}'.format(event))
+
+    return
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: send_response                                                     #
@@ -1025,6 +1778,197 @@ def get_interface_name(logger, log_id):
     return this_interface_name
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: update_ovoc_username                                              #
+#                                                                             #
+# Update the value stored in the 'config.py' file if necessary that defines   #
+# the OVOC account username used for performing REST API requests.            #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger        - File handler for storing logged actions                 #
+#     log_id        - Unique identifier for this devices log entries          #
+#     ovoc_username - OVOC account username                                   #
+#                                                                             #
+# Return:                                                                     #
+#    status - Boolean: Success or failure of the update action.               #
+# --------------------------------------------------------------------------- #
+def update_ovoc_username(logger, log_id, ovoc_username):
+    """Update OVOC account username used for REST API requests that is stored in 'config.py' file."""
+
+    status = False
+    do_update = False
+
+    # --------------------------------------------------------- #
+    # Read in current configuration file contents. The contents #
+    # will be modified by REGEX substitutions and written back  #
+    # the the 'config.py' file if differences exist.            #
+    # --------------------------------------------------------- #
+    config_file_contents = ''
+    event = 'Reading contents of "config.py" file.'
+    logger.debug('{} - {}'.format(log_id, event))
+    try:
+        with open('./config.py', 'r') as fp:
+            config_file_contents = fp.read()
+    except Exception as err:
+        event = 'Unable to read "config.py" file - Error: {}'.format(err)
+        logger.error('{} - {}'.format(log_id, event))
+        print('  - ERROR: {}'.format(event))
+
+    else:
+        event = 'Successfully read in "config.py" file.'
+        logger.debug('{} - {}'.format(log_id, event))
+
+        try:
+            # --------------------------------- #
+            # Check 'ovoc_username' for changes #
+            # --------------------------------- #
+            if ovoc_username != "" and ovoc_username != config.ovoc_username:
+                result = re.sub("(?s)ovoc_username = .*?$", "ovoc_username = '" + str(ovoc_username) + "'", config_file_contents, 1, re.MULTILINE)
+
+                if result != config_file_contents:
+                    # ------------------------------------------------- #
+                    # Configuration file contents successfully modified #
+                    # ------------------------------------------------- #
+                    config_file_contents = result
+                    do_update = True
+                    event = 'OVOC account username used for REST API requests update successfully prepared.'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  - INFO: {}'.format(event))
+                else:
+                    # -------------------------------------------- #
+                    # Failed to modify configuration file contents #
+                    # -------------------------------------------- #
+                    event = 'Failed to prepare update for OVOC account username used for REST API requests!'
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('  - ERROR: {}'.format(event))
+
+            else:
+                # -------------------- #
+                # No updates necessary #
+                # -------------------- #
+                status = True
+
+        except Exception as err:
+            event = 'Processing Error: {}'.format(err)
+            logger.error('{} - {}'.format(log_id, event))
+            print('  - ERROR: {}'.format(event))
+
+        else:
+            # ------------------------------- #
+            # Save configuration file updates #
+            # ------------------------------- #
+            if do_update:
+                try:
+                    with open('./config.py', 'w') as fp:
+                        fp.write(config_file_contents)
+                    status = True
+                    event = 'Successfully updated "config.py" file'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  - INFO: {}'.format(event))
+                except Exception as err:
+                    event = 'Unable to write "config.py" file - Error: {}'.format(err)
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('  - ERROR: {}'.format(event))
+
+    return status
+
+# ---------------------------------------------------------------------------- #
+# FUNCTION: get_ovoc_account                                                   #
+#                                                                              #
+# Get OVOC account username and password used for performing REST API requests #
+# to create SNMP alarm forwarding rules in the OVOC server this OVOC capture   #
+# app script is running on.                                                    #
+#                                                                              #
+# Parameters:                                                                  #
+#     logger - File handler for storing logged actions                         #
+#     log_id - Unique identifier for this devices log entries                  #
+#                                                                              #
+# Return:                                                                      #
+#    credentials - Dictionary with 'username' and 'password' elements.         #
+# ---------------------------------------------------------------------------- #
+def get_ovoc_account(logger, log_id):
+    """Get OVOC account username and password used for performing REST API requests."""
+
+    credentials = {}
+    credentials['username'] = ''
+    credentials['password'] = ''
+
+    stored_ovoc_username = config.ovoc_username
+
+    event = 'Retrieved stored OVOC account username: [{}]'.format(stored_ovoc_username)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # ------------------------------------------ #
+    # Allow modification of stored OVOC username #
+    # ------------------------------------------ #
+    print('')
+    print(':===============================================================================:')
+    print(': OVOC account username and password that can be used for performing REST API   :')
+    print(': requests. This script will use REST API to create the SNMP alarm forwarding   :')
+    print(': needed for the CPE capture scripts.                                           :')
+    print(':                                                                               :')
+    print(': NOTE: The account used must have at least "Operator" security level.          :')
+    print(':===============================================================================:')
+    this_ovoc_username = ''
+    while this_ovoc_username == '':
+        this_ovoc_username = str(raw_input('Enter OVOC account username: [{}] '.format(stored_ovoc_username))).strip()
+        event = 'Entered OVOC account username: [{}]'.format(this_ovoc_username)
+        logger.info('{} - {}'.format(log_id, event))
+        if this_ovoc_username == '':
+            this_ovoc_username = stored_ovoc_username
+            if this_ovoc_username != '':
+                event = 'Using existing OVOC account username: [{}]'.format(this_ovoc_username)
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                event = 'Must enter an OVOC account username used for performing REST API requests.'
+                logger.error('{} - {}'.format(log_id, event))
+                print('  - ERROR: {} Try again.'.format(event))
+        else:
+            event = 'Modifying OVOC account username to: [{}]'.format(this_ovoc_username)
+            logger.info('{} - {}'.format(log_id, event))
+
+    event = 'Set OVOC account username to: [{}]'.format(this_ovoc_username)
+    logger.info('{} - {}'.format(log_id, event))
+    print('  - INFO: {}'.format(event))
+    credentials['username'] = this_ovoc_username
+
+    # ------------------------- #
+    # Get OVOC account password #
+    # ------------------------- #
+    this_ovoc_password = ''
+    while this_ovoc_password == '':
+        this_ovoc_password = getpass(prompt='  - Password: ')
+        this_ovoc_password_verify = getpass(prompt='    Confirm password: ')
+        if this_ovoc_password != this_ovoc_password_verify:
+            event = 'Entered passwords do NOT match.'
+            logger.error('{} - {}'.format(log_id, event))
+            print('    - ERROR: {} Try again.'.format(event))
+            this_ovoc_password = ''
+        else:
+            if this_ovoc_password == '':
+                event = 'Passwords can not be empty!'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {} Try again.'.format(event))
+            else:
+                event = 'Entered passwords match!'
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+
+    event = 'Set OVOC account password'
+    logger.info('{} - {}'.format(log_id, event))
+    print('  - INFO: {}'.format(event))
+    credentials['password'] = this_ovoc_password
+
+    # ------------------------------------------------------ #
+    # Check if updates are necessary to the 'config.py' file #
+    # ------------------------------------------------------ #
+    if not update_ovoc_username(logger, log_id, this_ovoc_username):
+        event = 'Failed to update "config.py" file!'
+        logger.warning('{} - {}'.format(log_id, event))
+        print('  - WARNING: {} You can continue without saving the value entered.'.format(event))
+
+    return credentials
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: process_register                                                  #
 #                                                                             #
 # Process a REGISTER request from a CPE capture script.                       #
@@ -1035,13 +1979,14 @@ def get_interface_name(logger, log_id):
 #     server_socket  - Network socket object currenly bound to                #
 #     sendto_address - Tuple of address/port of CPE capture app to send resp  #
 #     target_device  - CPE device to start network traffic capture on         #
+#     credentials    - Credentials for OVOC account to do REST API requests   #
 #     devices_info   - Dictionary of targeted devices                         #
 #                                                                             #
 # Return:                                                                     #
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def process_register(logger, log_id, server_socket, sendto_address, target_device, devices_info):
+def process_register(logger, log_id, server_socket, sendto_address, target_device, credentials, devices_info):
     """Process REGISTER request from CPE capture script."""
 
     # --------------------------------------------------------------- #
@@ -1058,39 +2003,44 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
             device['lastRequest'] = 'REGISTER'
 
             # ------------------------------------------------------ #
-            # Add SNMP alarm forwarding rule for a 'Connection Lost' #
-            # event for this device.                                 #
+            # Set SNMP alarm forwarding rule for a 'Connection Lost' #
+            # event for this device. Alarm names in the list must be #
+            # named according to the SNMP OID name. Refer to the     #
+            # OVOC Alarms Monitoring Guide for mapping alarm names.  #
             # ------------------------------------------------------ #
-            #add_snmp_forwarding_rule(logger, log_id, device['device'], devices_info)
+            rule_name = 'Forward Connection Lost - {}'.format(target_device)
+            alarm_list = ['acEMSNodeConnectionLostAlarm']
+            set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
 
-            if device['ruleAdded'] == True:
-                # ----------------------------------------------- #
-                # Send 200 OK response to CPE capture app script. #
-                # ----------------------------------------------- #
-                this_response = '200 OK {}'.format(target_device)
-                response_type = '200 OK'
-            else:
-                this_response = '503 Service Unavailable {}'.format(target_device)
-                response_type = '503 Service Unavailable'
+            for send in range(0, 10, 1):
+                if device['ruleAdded'] == True:
+                    # ----------------------------------------------- #
+                    # Send 200 OK response to CPE capture app script. #
+                    # ----------------------------------------------- #
+                    this_response = '200 OK {}'.format(target_device)
+                    response_type = '200 OK'
+                else:
+                    this_response = '503 Service Unavailable {}'.format(target_device)
+                    response_type = '503 Service Unavailable'
 
-            event = 'Sending response for registering device on OVOC server: [{}]'.format(this_response)
-            logger.info('{} - {}'.format(log_id, event))
-            print('  + {}'.format(event))
-            if send_response(logger, log_id, server_socket, this_response, sendto_address):
-                event = 'Sent response for registering device on OVOC server.'
+                event = 'Sending response for registering device on OVOC server: [{}]'.format(this_response)
                 logger.info('{} - {}'.format(log_id, event))
-                print('    - INFO: {}'.format(event))
+                print('  + {}'.format(event))
+                if send_response(logger, log_id, server_socket, this_response, sendto_address):
+                    event = 'Sent response for registering device on OVOC server.'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('    - INFO: {}'.format(event))
 
-                # ----------------------------------------------- #
-                # Save this response in 'devices_info' dictionary #
-                # ----------------------------------------------- #
-                device['lastResponse'] = response_type
+                    # ----------------------------------------------- #
+                    # Save this response in 'devices_info' dictionary #
+                    # ----------------------------------------------- #
+                    device['lastResponse'] = response_type
 
-            else:
-                event = 'Failed to send response for registering device on OVOC server!'
-                logger.error('{} - {}'.format(log_id, event))
-                print('    - ERROR: {}'.format(event))
-                device['lastResponse'] = ''
+                else:
+                    event = 'Failed to send response for registering device on OVOC server!'
+                    logger.error('{} - {}'.format(log_id, event))
+                    print('    - ERROR: {}'.format(event))
+                    device['lastResponse'] = ''
 
     return
 
@@ -1131,7 +2081,7 @@ def process_capture(logger, log_id, server_socket, sendto_address, target_device
             # --------------------------------------------------- #
             this_response = '100 Trying {}'.format(target_device)
             response_type = '100 Trying'
-            event = 'Sending [100 Trying] response for starting capture for device: [{}]'.format(device['device'])
+            event = 'Sending [100 Trying] response for starting capture for device: [{}]'.format(target_device)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
             if send_response(logger, log_id, server_socket, this_response, sendto_address):
@@ -1172,12 +2122,12 @@ def process_capture(logger, log_id, server_socket, sendto_address, target_device
                 # --------------------------------- #
                 # Abort capture for this CPE device #
                 # --------------------------------- #
-                abort_capture(logger, log_id, device['device'], devices_info)
+                abort_capture(logger, log_id, target_device, devices_info)
 
             # ----------------------------------------- #
             # Start tcpdump capture for this CPE device #
             # ----------------------------------------- #
-            start_capture(logger, log_id, device['device'], interface_name, devices_info)
+            start_capture(logger, log_id, target_device, interface_name, devices_info)
 
             if devices['ovocCapture'].lower() == 'active':
                 # ----------------------------------------------- #
@@ -1259,8 +2209,8 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
@@ -1276,16 +2226,18 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 
             started = False
 
-            if this_device['ovocCapture'].lower() == 'not active':
+            if device['ovocCapture'].lower() == 'not active':
 
-                print('Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
+                event = 'Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, target_device)
+                logger.info('{} - {}'.format(log_id, event))
+                print('{}'.format(event))
 
                 # -------------------------------- #
                 # Create filename to store pcap as #
                 # -------------------------------- #
                 file_timestamp = datetime.now()
                 file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
-                filename = 'tmp_device_{}_{}.pcap'.format(this_device['device'], file_timestamp)
+                filename = 'tmp_device_{}_{}.pcap'.format(target_device, file_timestamp)
                 filename = re.sub(':', '.', filename)
 
                 # ------------------------------------------- #
@@ -1313,14 +2265,14 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
                 #                                                                       #
                 # Send normal output to /dev/null and echo out the PID number to save   #
                 # --------------------------------------------------------------------- #
-                capture_cmd = "nohup tcpdump -i {} -w ./captures/{} -W 3 -C 10 host {} > /dev/null 2>&1 & echo $!".format(interface_name, filename, this_device['device'])
+                capture_cmd = "nohup tcpdump -i {} -w ./captures/{} -W 3 -C 10 host {} > /dev/null 2>&1 & echo $!".format(interface_name, filename, target_device)
 
                 pid = os.popen(capture_cmd).read().strip()
 
                 # ------------------------------------------------------------ #
                 # Save PID in 'devices_info' dictionary record for this device #
                 # ------------------------------------------------------------ #
-                this_device['pid'] = pid
+                device['pid'] = pid
 
                 try:
                     os.kill(int(pid), 0)
@@ -1339,7 +2291,7 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                this_device['tasks'].append(start_capture_task.copy())
+                device['tasks'].append(start_capture_task.copy())
                 device_status = start_capture_task['status']
                 logger.debug('{} - {}'.format(log_id, device_status))
                 last_description = start_capture_task['description']
@@ -1362,16 +2314,16 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            this_device['status'] = device_status
-            this_device['description'] = last_description
-            this_device['tempCapture'] = filename
+            device['status'] = device_status
+            device['description'] = last_description
+            device['tempCapture'] = filename
 
             if started:
-                this_device['ovocCapture'] = 'active'
-                this_device['severity'] = 'NORMAL'
+                device['ovocCapture'] = 'active'
+                device['severity'] = 'NORMAL'
             else:
-                this_device['ovocCapture'] = 'not active'
-                this_device['severity'] = 'CRITICAL'
+                device['ovocCapture'] = 'not active'
+                device['severity'] = 'CRITICAL'
 
             break
 
@@ -1422,7 +2374,7 @@ def process_stop(logger, log_id, server_socket, sendto_address, target_device, f
             # --------------------------------------------------- #
             this_response = '100 Trying {}'.format(target_device)
             response_type = '100 Trying'
-            event = 'Sending [100 Trying] response for stopping capture for device: [{}]'.format(device['device'])
+            event = 'Sending [100 Trying] response for stopping capture for device: [{}]'.format(target_device)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
             if send_response(logger, log_id, server_socket, this_response, sendto_address):
@@ -1444,16 +2396,16 @@ def process_stop(logger, log_id, server_socket, sendto_address, target_device, f
             # -------------------------------- #
             # Stop capture for this CPE device #
             # -------------------------------- #
-            stop_capture(logger, log_id, device['device'], filename, devices_info)
+            stop_capture(logger, log_id, target_device, filename, devices_info)
 
             if device['ovocCapture'].lower() == 'not active':
                 # ----------------------------------------------- #
                 # Send 200 OK response to CPE capture app script. #
                 # ----------------------------------------------- #
-                this_response = '200 OK {}'.format(device['device'])
+                this_response = '200 OK {}'.format(target_device)
                 response_type = '200 OK'
             else:
-                this_response = '503 Service Unavailable {}'.format(device['device'])
+                this_response = '503 Service Unavailable {}'.format(target_device)
                 response_type = '503 Service Unavailable'
 
             event = 'Sending response for stopping capture on OVOC server: [{}]'.format(this_response)
@@ -1480,7 +2432,7 @@ def process_stop(logger, log_id, server_socket, sendto_address, target_device, f
     # ------------------------------------------------------- #
     if not device_found:
 
-        this_response = '404 Not Found {}'.format(device['device'])
+        this_response = '404 Not Found {}'.format(target_device)
         response_type = '404 Not Found'
         event = 'Sending response for starting capture on OVOC server: [{}]'.format(this_response)
         logger.info('{} - {}'.format(log_id, event))
@@ -1533,8 +2485,8 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
@@ -1549,10 +2501,12 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
 
             stopped = False
 
-            if this_device['ovocCapture'].lower() == 'active':
+            if device['ovocCapture'].lower() == 'active':
 
                 task_count += 1
-                print('Stopping network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
+                event = 'Stopping network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, target_device)
+                logger.info('{} - {}'.format(log_id, event))
+                print('{}'.format(event))
 
                 # ------------------------------------------ #
                 # Attempt to stop tcpdump capture for device #
@@ -1570,7 +2524,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                 # ----------------------------------------------------------- #
                 # Get PID in 'devices_info' dictionary record for this device #
                 # ----------------------------------------------------------- #
-                pid = this_device['pid']
+                pid = device['pid']
 
                 if pid != '':
 
@@ -1605,7 +2559,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                this_device['tasks'].append(stop_capture_task.copy())
+                device['tasks'].append(stop_capture_task.copy())
 
                 # --------------- #
                 # Display results #
@@ -1630,7 +2584,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                     # file will have a '0', '1', or '2' appended to the filename. #
                     # ----------------------------------------------------------- #
                     path = './captures/'
-                    temp_filename = this_device['tempCapture']
+                    temp_filename = device['tempCapture']
 
                     # -------------------------------------------------- #
                     # Rename up to 3 pcap files. The '-W 3' parameter on #
@@ -1699,8 +2653,8 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
                             # ---------------------- #
                             # Store task information #
                             # ---------------------- #
-                            this_device['tasks'].append(rename_capture_task.copy())
-                            this_device['ovocCapture' + str(index)] = local_file
+                            device['tasks'].append(rename_capture_task.copy())
+                            device['ovocCapture' + str(index)] = local_file
 
                             # --------------- #
                             # Display results #
@@ -1724,19 +2678,19 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            this_device['status'] = device_status
-            this_device['description'] = device_description
+            device['status'] = device_status
+            device['description'] = device_description
 
             if stopped:
-                this_device['ovocCapture'] = 'not active'
-                this_device['pid'] = ''
+                device['ovocCapture'] = 'not active'
+                device['pid'] = ''
                 if renamed:
-                    this_device['severity'] = 'NORMAL'
+                    device['severity'] = 'NORMAL'
                 else:
-                    this_device['severity'] = 'MINOR'
+                    device['severity'] = 'MINOR'
             else:
-                this_device['ovocCapture'] = 'active'
-                this_device['severity'] = 'MAJOR'
+                device['ovocCapture'] = 'active'
+                device['severity'] = 'MAJOR'
 
             break
 
@@ -1777,8 +2731,8 @@ def abort_capture(logger, log_id, target_device, devices_info):
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
@@ -1793,10 +2747,12 @@ def abort_capture(logger, log_id, target_device, devices_info):
 
             aborted = False
 
-            if this_device['ovocCapture'].lower() == 'active':
+            if device['ovocCapture'].lower() == 'active':
 
                 task_count += 1
-                print('Aborting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, this_device['device']))
+                event = 'Aborting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, target_device)
+                logger.info('{} - {}'.format(log_id, event))
+                print('{}'.format(event))
 
                 # ------------------------------------------ #
                 # Attempt to stop tcpdump capture for device #
@@ -1813,14 +2769,14 @@ def abort_capture(logger, log_id, target_device, devices_info):
                 # ----------------------------------------------------------- #
                 # Get PID in 'devices_info' dictionary record for this device #
                 # ----------------------------------------------------------- #
-                pid = this_device['pid']
+                pid = device['pid']
 
                 if pid != '':
 
                     # ------------------------------------------------------ #
                     # Get temporary base filename of current tcpdump capture #
                     # ------------------------------------------------------ #
-                    temp_filename = this_device['tempCapture']
+                    temp_filename = device['tempCapture']
 
                     try:
                         os.kill(int(pid), 15)
@@ -1853,7 +2809,7 @@ def abort_capture(logger, log_id, target_device, devices_info):
                 # ---------------------- #
                 # Store task information #
                 # ---------------------- #
-                this_device['tasks'].append(abort_capture_task.copy())
+                device['tasks'].append(abort_capture_task.copy())
 
                 # --------------- #
                 # Display results #
@@ -1922,7 +2878,7 @@ def abort_capture(logger, log_id, target_device, devices_info):
                         # ---------------------- #
                         # Store task information #
                         # ---------------------- #
-                        this_device['tasks'].append(remove_capture_task.copy())
+                        device['tasks'].append(remove_capture_task.copy())
 
                         # --------------- #
                         # Display results #
@@ -1942,19 +2898,19 @@ def abort_capture(logger, log_id, target_device, devices_info):
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            this_device['status'] = device_status
-            this_device['description'] = device_description
+            device['status'] = device_status
+            device['description'] = device_description
 
             if aborted:
-                this_device['ovocCapture'] = 'not active'
-                this_device['pid'] = ''
+                device['ovocCapture'] = 'not active'
+                device['pid'] = ''
                 if removed:
-                    this_device['severity'] = 'NORMAL'
+                    device['severity'] = 'NORMAL'
                 else:
-                    this_device['severity'] = 'MINOR'
+                    device['severity'] = 'MINOR'
             else:
-                this_device['ovocCapture'] = 'active'
-                this_device['severity'] = 'MAJOR'
+                device['ovocCapture'] = 'active'
+                device['severity'] = 'MAJOR'
 
             break
 
@@ -2398,6 +3354,11 @@ def main(argv):
     # ------------------ #
     version = config.version
 
+    print('')
+    print('=================================================================================')
+    print(' Version: {:10s}            OVOC CAPTURE APP'.format(version))
+    print('=================================================================================')
+
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
     # ------------------------------------------- #
@@ -2412,9 +3373,12 @@ def main(argv):
     try:
         if not os.path.isdir('./captures'):
             os.makedirs('./captures')
-            print('Capture directory [./captures] created successfully.')
+            event = 'Capture directory [./captures] created successfully.'
+            logger.info('{} - {}'.format(log_id, event))
     except OSError as error:
-        print('Capture directory [./captures] can not be created!')
+        event = 'Capture directory [./captures] can not be created!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('CRITICAL: {}'.format(event))
         exit(1)
 
     # ------------------------------------------------------------------- #
@@ -2449,6 +3413,7 @@ def main(argv):
         listen_port = get_listen_port(logger, log_id)
         prevent_shutdown = get_prevent_shutdown(logger, log_id)
         interface_name = get_interface_name(logger, log_id)
+        ovoc_credentials = get_ovoc_account(logger, log_id)
 
     except KeyboardInterrupt:
         print('')
@@ -2458,14 +3423,12 @@ def main(argv):
         exit(1)
 
     begin_time = time.time()
-    #begin_timestamp = datetime.now()
     begin_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
     print('=================================================================================')
-    #print('                         OVOC NETWORK TRAFFIC CAPTURES')
-    print(' Version: {:10s}     OVOC NETWORK TRAFFIC CAPTURES'.format(version))
+    print('                         OVOC NETWORK TRAFFIC CAPTURES')
+    #print(' Version: {:10s}     OVOC NETWORK TRAFFIC CAPTURES'.format(version))
     print('=================================================================================')
-    #print('   Version: {}'.format(version))
     print('Start Time: {}'.format(begin_timestamp))
     print('---------------------------------------------------------------------------------')
 
@@ -2475,7 +3438,7 @@ def main(argv):
     # app scripts that control the triggers for         #
     # preforming network traffic captures.              #
     # ------------------------------------------------- #
-    buffer_size = 1024
+    buffer_size = 16384
 
     # -------------------------------------- #
     # Create a UDP datagram socket to listen #
@@ -2492,7 +3455,7 @@ def main(argv):
 
     else:
 
-        event = 'Listening for requests on UDP port: [{}]'.format(listen_port)
+        event = 'Listening for script messaging on UDP port: [{}]'.format(listen_port)
         logger.info('{} - {}'.format(log_id, event))
         print('{}'.format(event))
 
@@ -2535,7 +3498,7 @@ def main(argv):
                 # ------------------------------------------------------- #
                 if msg_info['request'] == 'REGISTER':
 
-                    process_register(logger, log_id, server_socket, from_address, target_device, devices_info)
+                    process_register(logger, log_id, server_socket, from_address, target_device, ovoc_credentials, devices_info)
 
                 # ---------------------------------------------------- #
                 # If a 'CAPTURE' request has been received, then start #
@@ -2580,9 +3543,9 @@ def main(argv):
             event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
             logger.debug('{} - {}'.format(log_id, event))
 
-            event = 'Listening for requests on UDP port: [{}]'.format(listen_port)
-            logger.info('{} - {}'.format(log_id, event))
-            print('{}'.format(event))
+            #event = 'Listening for script messaging on UDP port: [{}]'.format(listen_port)
+            #logger.info('{} - {}'.format(log_id, event))
+            #print('{}'.format(event))
 
         event = 'All devices have completed'
         logger.info('{} - {}'.format(log_id, event))
