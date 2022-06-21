@@ -980,12 +980,15 @@ def create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_l
 # Return:                                                                     #
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
+#    rule_ready   - Boolean: 'True' if setup successful, 'False' is not.      #
 # --------------------------------------------------------------------------- #
-def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
+def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info):
     """Set SNMP alarm forwarding rule on OVOC server."""
 
     address = sendto_address[0]
     port = sendto_address[1]
+
+    rule_ready = False
 
     # ------------------------------------------ #
     # If setting up a global forwarding rule not #
@@ -1010,6 +1013,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
             event = create_fwd_rule_task['description']
             if create_fwd_rule_task['status'].lower() == 'success':
                 print('  + INFO: {}'.format(event))
+                rule_ready = True
             else:
                 print('  + CRITICAL: {}'.format(event))
 
@@ -1027,6 +1031,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
             event = update_fwd_rule_task['description']
             if update_fwd_rule_task['status'].lower() == 'success':
                 print('  + INFO: {}'.format(event))
+                rule_ready = True
             else:
                 print('  + WARNING: {}'.format(event))
 
@@ -1133,6 +1138,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         if create_fwd_rule_task['status'].lower() == 'success':
                             logger.info('{} - {}'.format(log_id, event))
                             print('  + INFO: {}'.format(event))
+                            rule_ready = True
                         else:
                             logger.error('{} - {}'.format(log_id, event))
                             print('  + CRITICAL: {}'.format(event))
@@ -1165,6 +1171,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         if update_fwd_rule_task['status'].lower() == 'success':
                             logger.info('{} - {}'.format(log_id, event))
                             print('  + INFO: {}'.format(event))
+                            rule_ready = True
                         else:
                             logger.error('{} - {}'.format(log_id, event))
                             print('  + WARNING: {}'.format(event))
@@ -1192,7 +1199,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
             logger.error('{} - {}'.format(log_id, event))
             print('  + ERROR: {}'.format(event))
 
-    return
+    return rule_ready
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: send_response                                                     #
@@ -2010,37 +2017,36 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
             # ------------------------------------------------------ #
             rule_name = 'Forward Connection Lost - {}'.format(target_device)
             alarm_list = ['acEMSNodeConnectionLostAlarm']
-            set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
+            rule_ready = set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
 
-            for send in range(0, 10, 1):
-                if device['ruleAdded'] == True:
-                    # ----------------------------------------------- #
-                    # Send 200 OK response to CPE capture app script. #
-                    # ----------------------------------------------- #
-                    this_response = '200 OK {}'.format(target_device)
-                    response_type = '200 OK'
-                else:
-                    this_response = '503 Service Unavailable {}'.format(target_device)
-                    response_type = '503 Service Unavailable'
+            if rule_ready:
+                # ----------------------------------------------- #
+                # Send 200 OK response to CPE capture app script. #
+                # ----------------------------------------------- #
+                this_response = '200 OK {}'.format(target_device)
+                response_type = '200 OK'
+            else:
+                this_response = '503 Service Unavailable {}'.format(target_device)
+                response_type = '503 Service Unavailable'
 
-                event = 'Sending response for registering device on OVOC server: [{}]'.format(this_response)
+            event = 'Sending response for registering device on OVOC server: [{}]'.format(this_response)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+            if send_response(logger, log_id, server_socket, this_response, sendto_address):
+                event = 'Sent response for registering device on OVOC server.'
                 logger.info('{} - {}'.format(log_id, event))
-                print('  + {}'.format(event))
-                if send_response(logger, log_id, server_socket, this_response, sendto_address):
-                    event = 'Sent response for registering device on OVOC server.'
-                    logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
+                print('    - INFO: {}'.format(event))
 
-                    # ----------------------------------------------- #
-                    # Save this response in 'devices_info' dictionary #
-                    # ----------------------------------------------- #
-                    device['lastResponse'] = response_type
+                # ----------------------------------------------- #
+                # Save this response in 'devices_info' dictionary #
+                # ----------------------------------------------- #
+                device['lastResponse'] = response_type
 
-                else:
-                    event = 'Failed to send response for registering device on OVOC server!'
-                    logger.error('{} - {}'.format(log_id, event))
-                    print('    - ERROR: {}'.format(event))
-                    device['lastResponse'] = ''
+            else:
+                event = 'Failed to send response for registering device on OVOC server!'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+                device['lastResponse'] = ''
 
     return
 
@@ -3125,7 +3131,6 @@ def register_device(logger, log_id, target_device, devices_info):
         devices_info['devices'].append({})
         device_index = len(devices_info['devices']) - 1
         devices_info['devices'][device_index]['device'] = target_device
-        devices_info['devices'][device_index]['ruleAdded'] = False
         devices_info['devices'][device_index]['tasks'] = []
 
         # ------------------------------------------------------ #
