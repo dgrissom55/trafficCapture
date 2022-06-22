@@ -82,38 +82,46 @@ be a '503 Service Unavailable'.
 
 This script tracks capture states, all tasks, and other information for each
 targeted CPE device. The 'devices_info' dictionary is created to track each
-devices information. The following is an example of what is tracked:
+devices information.
 
- {
-     "devices": [
-         {
-             "device": "<device ip address>",
-             "status": "Success|Failure",
-             "ovocCapture": "active|not active",
-             "description": "<some description>",
-             "cpeFilename": "<CPE capture filename>",
-             "lastCapture": "<last stopped capture filename>",
-             "lastRequest": "<some request>",
-             "lastResponse": "<some response>",
-             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
-             "tasks": [
-                 {
-                     "task": "<task name>",
-                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
-                     "status": "Success|Failure",
-                     "description": "<status information>",
-                 },
-                 ...
-                 <Next Task>
-             ]
-         },
-         ...
-         <Next Device>
-     ]
- }
- 
- For a 'Stop capture' task, the following item is added to the task items:
-                     "filename": "<capture filename>",
+The following is an example of what is tracked:
+
+  {
+      "devices": [
+          {
+              "device": "<device address>",
+              "status": "Success|Failure",
+              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+              "description": "<some descriptive text>",
+              "tasks": [
+                  {
+                      "task": "<some task name>",
+                      "status": "Success|Fail",
+                      "statusCode": <some HTTP response code>,
+                      "description": "<some descriptive text>",
+                      "timestamp": "2022-06-22T16:13:39.895358"
+
+                      <OTHER TASK SPECIFIC ITEMS, For instance>
+                      "deviceId": <some value>
+                      "ruleId": <some value>
+                  },
+              ],
+              "cpeFilename": "<filename of stored CPE capture file on CPE script>
+              "tempCapture": "<local tcpdump filename before renamed to match CPE filename>",
+              "pid": "<some PID of tcpdump process>",
+              "ovocCapture0": "<filename 1 from OVOC tcpdump capture that matches CPE filename>",
+              "ovocCapture1": "<filename 2 from OVOC tcpdump capture that matches CPE filename>",
+              "ovocCapture2": "<filename 3 from OVOC tcpdump capture that matches CPE filename>",
+              "registration": "active|not active",
+              "ovocCapture": "not active",
+              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastResponse": "200 OK",
+          },
+
+          <NEXT DEVICE>
+
+      ]
+  }
 
 -------------------------------------------------------------------------------
 """
