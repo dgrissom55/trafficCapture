@@ -52,65 +52,84 @@ an 'OK' when the tcpdump process is running. The response will be 'FAIL' if
 the capture fails to be started on the OVOC server. The captures are stopped
 on the OVOC after this script receives the 'Connection Lost' SNMP alarm. This
 script will send a 'STOP' message to the OVOC server to trigger it to kill the
-tcpdump process for that CPE device. The following messages are exchanged:
+tcpdump process for that CPE device.
 
+The following messages are exchanged:
 
-  This script                                 OVOC server
+  CPE script                                 This script
        |                                           |
        |-------- CAPTURE <device address> -------->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
        |---- STOP <device address> <filename> ---->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
+
+If this script receives a request and the device address is not found in the
+devices information dictionary, then a '404 Not Found' is returned.
+
+If the capture fails to be started or fails to stop, then the response will
+be a '503 Service Unavailable'.
 
 This script tracks capture states, all tasks, and other information for each
 targeted CPE device. The 'devices_info' dictionary is created to track each
-devices information. The following is an example of what is tracked:
+devices information.
 
- {
-     "devices": [
-         {
-             "device": "<device ip address>",
-             "username": "<device REST API username>",
-             "password": "<device REST API password>",
-             "registration": "active|not active|aborted",
-             "registerAttempts": <some value>,
-             "completed": True|False,
-             "status": "Success|Failure",
-             "cpeCapture": "active|not active",
-             "events": "Success|Failure",
-             "ovocCapture": "active|not active",
-             "description": "<some description>",
-             "lastRequest": "<some command request>",
-             "lastResponse": "<some command response>",
-             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
-             "tasks": [
-                 {
-                     "task": "<task name>",
-                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
-                     "status": "Success|Failure",
-                     "statusCode": <http response status code>,
-                     "output": "<CLI script execution>",
-                     "description": "<CLI script load status>",
-                 },
-                 ...
-                 <Next Task>
-             ]
-         },
-         ...
-         <Next Device>
-     ]
- }
- 
- For a 'Stop capture' task, the following item is added to the task items:
-                     "filename": "<capture filename>",
+The following is an example of what is tracked:
+
+  {
+      "devices": [
+          {
+              "device": "<device address>",
+              "status": "Success|Failure",
+              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+              "description": "<some descriptive text>",
+              "type": "MSBR|GWSBC",
+              "interfaces": [
+                  "eth-lan",
+                  <NEXT INTERFACE>
+              ],
+              "username": "<some username>",
+              "password": "*****",             <- Hidden password
+              "ovoc": "<associated OVOC address>",
+              "completed": true|false,
+              "tasks": [
+                  {
+                      "task": "<some task name>",
+                      "status": "Success|Fail",
+                      "statusCode": <some HTTP response code>,
+                      "description": "<some CLI descriptive text>",
+                      "timestamp": "2022-06-22T16:13:39.895358"
+
+                      <OTHER TASK SPECIFIC ITEMS, For instance>
+                      "output": "<some CLI output text>",
+                      "filename": "<stored CPE debug capture filename>",
+
+                  },
+
+                  <NEXT TASK>
+
+              ],
+              "cpeCapture": "active|not active",
+              "ovocCapture": "active|not active",
+              "registration": "active|not active|aborted",
+              "registerAttempts": <some value>,
+              "events": <some value>,
+              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastResponse": "<some response>",
+              "lastCapture": "<stored CPE capture filename>
+          },
+
+          <NEXT DEVICE>
+
+      ]
+  }
 
 -------------------------------------------------------------------------------
 """
