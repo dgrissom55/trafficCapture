@@ -132,7 +132,10 @@ import gzip
 import shutil
 #import pathlib
 import glob
+import pycurl
+import urllib
 
+from io import BytesIO
 from datetime import datetime
 from getpass import getpass
 
@@ -327,35 +330,129 @@ def rotate_logs(logger, log_id, log_file, max_size, archived_files):
 def send_rest(method, url, username, password, data=None, data_type='json'):
     """Send REST API request to server and return response."""
 
-    # ----------------------------- #
-    # Set with Basic Authentication #
-    # ----------------------------- #
-    pwd = username + ':' + password
-    headers = {'Authorization': 'Basic ' + base64.b64encode(pwd.encode('utf-8', 'ignore')).decode('utf-8', 'ignore')}
+    def response():
+        status_code = 0
+        reason = ''
+        text = ''
+        headers = {}
+        #headers['Content-Type'] = ''
 
-    # ------------------------------------------ #
-    # Send REST request based on the method type #
-    # ------------------------------------------ #
+    resp_headers = {}
+    def header_function(header_line):
+        # HTTP standard specifies that headers are encoded in iso-8859-1.
+        # On Python 2, decoding step can be skipped.
+        # On Python 3, decoding step is required.
+        #header_line = header_line.decode('iso-8859-1')
+        header_line = header_line.decode('utf-8')
+
+        # Header lines include the first status line (HTTP/1.x ...).
+        # We are going to ignore all lines that don't have a colon in them.
+        # This will botch headers that are split on multiple lines...
+        if ':' not in header_line:
+            return
+
+        # Break the header line into header name and value.
+        name, value = header_line.split(':', 1)
+
+        # Remove whitespace that may be present.
+        # Header lines include the trailing newline, and there may be whitespace
+        # around the colon.
+        name = name.strip()
+        value = value.strip()
+
+        # Header names are case insensitive.
+        # Lowercase name here.
+        #name = name.lower()
+
+        # Now we can actually record the header name and value.
+        # Note: this only works when headers are not duplicated, see below.
+        resp_headers[name] = value
+
+    headers = []
+    headers.append('Cache-Control: no-cache')
+
+    url = urllib.quote(url, safe='/:?&=()')
+
+    buffer = BytesIO()
+    resp_hdrs = BytesIO()
+    rest = pycurl.Curl()
+    rest.setopt(rest.URL, url)
+    rest.setopt(rest.WRITEFUNCTION, buffer.write)
+    #rest.setopt(rest.HEADERFUNCTION, resp_hdrs.write)
+    rest.setopt(rest.HEADERFUNCTION, header_function)
+    rest.setopt(rest.SSL_VERIFYHOST, False)
+    rest.setopt(rest.SSL_VERIFYPEER, False)
+    rest.setopt(rest.HTTPAUTH, 1)
+    rest.setopt(rest.USERPWD, username + ':' + password)
+    rest.setopt(rest.CONNECTTIMEOUT, 5)
+
+    if method == 'POST':
+        rest.setopt(rest.POST, True)
+    if method == 'PUT':
+        rest.setopt(rest.PUT, True)
+    if method == 'GET':
+        rest.setopt(rest.HTTPGET, True)
+
+    if method == 'POST' or method == 'PUT':
+        headers.append('Transfer-Encoding:')
+        headers.append('Expect:')
+
+        body = ''
+
+        if data_type == 'file' and data is not None:
+            eol_chars = '\r\n'
+            boundary = 'provision-' + str(int(time.time()))
+            headers.append('Content-Type: multipart/form-data; boundary=' + boundary)
+            body = body + '--' + boundary + eol_chars
+            body = body + 'Content-Disposition: form-data; name="file"; filename="file.data"' + eol_chars
+            body = body + 'Content-Type: text/plain' + eol_chars + eol_chars
+            body = body + data + eol_chars
+            body = body + '--' + boundary + '--' + eol_chars
+
+        if data_type == 'json':
+            headers.append('Content-Type: application/json')
+            body = body + json.dumps(data)
+
+        headers.append('content-length: ' + str(len(body)))
+        rest.setopt(rest.POSTFIELDS, body)
+
+    rest.setopt(rest.HTTPHEADER, headers)
+
+    response.headers = {}
+    response.status_code = 0
+    response.reason = ''
+    response.text = ''
+    #response.headers['Content-Type'] = ''
+
     try:
-        if method == 'GET':
-            response = requests.get(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'POST':
-            if data_type == 'json':
-                response = requests.post(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-            elif data_type == 'files':
-                response = requests.post(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'PUT':
-            if data_type == 'json':
-                response = requests.put(url, data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-            elif data_type == 'files':
-                response = requests.put(url, files=data, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=headers, verify=False, timeout=(3, 6), allow_redirects=False)
+        rest.perform()
 
-    except Exception as err:
-        response = str(err)
+        # ----------------- #
+        # Set return values #
+        # ----------------- #
+        response.status_code = rest.getinfo(rest.RESPONSE_CODE)
+        response.text = buffer.getvalue()
+        response.headers['Content-Type'] = rest.getinfo(rest.CONTENT_TYPE)
 
-    return response
+        #response.reason = ''
+        #status_line = resp_hdrs.getvalue().splitlines()[0]
+        #reason_match = re.match(r'HTTP\/\S*\s*\d+\s*(.*?)\s*$', status_line)
+        #if reason_match:
+        #    response.reason = reason_match.group(1)
+
+        rest.close()
+
+        print('Resp_Headers:\n{}'.format(resp_headers))
+        response.headers = resp_headers.copy()
+        print('Response Headers:\n{}'.format(response.headers))
+
+    except pycurl.error as err:
+        #response.status_code = err.args[0]
+        #response.reason = err.args[1]
+        return str(err)
+
+    else:
+        return response
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: get_address_type                                                  #
@@ -437,7 +534,7 @@ def get_device_id(logger, log_id, target_device, credentials):
     else:
         url = "https://127.0.0.1/ovoc/v1/topology/devices?detail=1&filter=(ipAddress='" + target_device + "')"
 
-    event = 'Method [GET]" - Request URL: {}'.format(url)
+    event = 'Method [GET] - Request URL: {}'.format(url)
     logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
@@ -458,6 +555,9 @@ def get_device_id(logger, log_id, target_device, credentials):
         event = 'REST request failed. Could not verify if CPE device is on OVOC server.'
         logger.warning('{} - {}'.format(log_id, event))
     else:
+        for header in rest_response.headers.items():
+            logger.debug('{} - {}'.format(log_id, header))
+
         if 'Content-Type' in rest_response.headers:
             if re.search('application/json', rest_response.headers['Content-Type']):
                 rest_response_data = {}
@@ -559,7 +659,7 @@ def get_fwd_rule_id(logger, log_id, rule_name, credentials):
     # ---------------- #
     url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules?detail=1&filter=(name='" + rule_name + "')"
 
-    event = 'Method [GET]" - Request URL: {}'.format(url)
+    event = 'Method [GET] - Request URL: {}'.format(url)
     logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
@@ -580,6 +680,9 @@ def get_fwd_rule_id(logger, log_id, rule_name, credentials):
         event = 'REST request failed. Could not verify if SNMP alarm forwarding rule is on OVOC server.'
         logger.warning('{} - {}'.format(log_id, event))
     else:
+        for header in rest_response.headers:
+            logger.debug('{} - {}'.format(log_id, header))
+
         if 'Content-Type' in rest_response.headers:
             if re.search('application/json', rest_response.headers['Content-Type']):
                 rest_response_data = {}
@@ -699,10 +802,10 @@ def update_fwd_rule(logger, log_id, rule_id, device_id, address, port, alarm_lis
         request_body['alarmSitesFilter'] = None
         request_body['alarmDevicesFilter'] = None
     else:
-        request_body['alarmTenantsFilter'] = None
-        request_body['alarmRegionsFilter'] = None
-        request_body['alarmEndpointsFilter'] = None
-        request_body['alarmSitesFilter'] = None
+        request_body['alarmTenantsFilter'] = []
+        request_body['alarmRegionsFilter'] = []
+        request_body['alarmEndpointsFilter'] = []
+        request_body['alarmSitesFilter'] = []
         request_body['alarmDevicesFilter'] = []
         request_body['alarmDevicesFilter'].append(device_id)
 
@@ -720,7 +823,7 @@ def update_fwd_rule(logger, log_id, rule_id, device_id, address, port, alarm_lis
     # ---------------- #
     url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules/" + str(rule_id)
 
-    event = 'Method [PUT]" - Request URL: {}'.format(url)
+    event = 'Method [PUT] - Request URL: {}'.format(url)
     logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
@@ -850,10 +953,10 @@ def create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_l
         request_body['alarmSitesFilter'] = None
         request_body['alarmDevicesFilter'] = None
     else:
-        request_body['alarmTenantsFilter'] = None
-        request_body['alarmRegionsFilter'] = None
-        request_body['alarmEndpointsFilter'] = None
-        request_body['alarmSitesFilter'] = None
+        request_body['alarmTenantsFilter'] = []
+        request_body['alarmRegionsFilter'] = []
+        request_body['alarmEndpointsFilter'] = []
+        request_body['alarmSitesFilter'] = []
         request_body['alarmDevicesFilter'] = []
         request_body['alarmDevicesFilter'].append(device_id)
 
@@ -871,7 +974,7 @@ def create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_l
     # ---------------- #
     url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules"
 
-    event = 'Method [POST]" - Request URL: {}'.format(url)
+    event = 'Method [POST] - Request URL: {}'.format(url)
     logger.info('{} - {}'.format(log_id, event))
 
     # -------------------------------- #
@@ -1056,7 +1159,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                 device_severity = ''
                 last_description = ''
 
-                event = 'Starting network traffic capture for CPE device #{}: [{}]'.format(device_index + 1, target_device)
+                event = 'Checking if OVOC is managing device: [{}]'.format(target_device)
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
@@ -1076,16 +1179,18 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                 # --------------- #
                 event = get_device_task['description']
                 if device_status.lower() == 'success':
-                    logger.info('{} - {}'.format(log_id, event))
                     print('    - INFO: {}'.format(event))
                 else:
-                    logger.error('{} - {}'.format(log_id, event))
                     print('    - ERROR: {}'.format(event))
 
                 # -------------------------------------- #
                 # If device found, setup forwarding rule #
                 # -------------------------------------- #
                 if get_device_task['deviceId'] != -1:
+
+                    event = 'Checking if device has existing SNMP alarm forwarding rule.'
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
 
                     # --------------------------------------------------- #
                     # Check for device SNMP alarm forwarding rule on OVOC #
@@ -1102,12 +1207,10 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                     # --------------- #
                     # Display results #
                     # --------------- #
-                    event = get_device_task['description']
+                    event = get_fwd_rule_task['description']
                     if device_status.lower() == 'success':
-                        logger.info('{} - {}'.format(log_id, event))
                         print('    - INFO: {}'.format(event))
                     else:
-                        logger.error('{} - {}'.format(log_id, event))
                         print('    - ERROR: {}'.format(event))
 
                     # ---------------------------- #
@@ -1136,11 +1239,9 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         # --------------- #
                         event = create_fwd_rule_task['description']
                         if create_fwd_rule_task['status'].lower() == 'success':
-                            logger.info('{} - {}'.format(log_id, event))
                             print('  + INFO: {}'.format(event))
                             rule_ready = True
                         else:
-                            logger.error('{} - {}'.format(log_id, event))
                             print('  + CRITICAL: {}'.format(event))
 
                     # -------------------- #
@@ -1148,7 +1249,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                     # -------------------- #
                     else:
 
-                        event = 'Updating global SNMP alarm forwarding rule: [{}]'.format(rule_name)
+                        event = 'Updating SNMP alarm forwarding rule [{}] for device: [{}]'.format(rule_name, target_device)
                         logger.info('{} - {}'.format(log_id, event))
                         print('{}'.format(event))
 
@@ -1169,11 +1270,9 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         # --------------- #
                         event = update_fwd_rule_task['description']
                         if update_fwd_rule_task['status'].lower() == 'success':
-                            logger.info('{} - {}'.format(log_id, event))
                             print('  + INFO: {}'.format(event))
                             rule_ready = True
                         else:
-                            logger.error('{} - {}'.format(log_id, event))
                             print('  + WARNING: {}'.format(event))
 
                 # -------------------------------------- #
@@ -1181,13 +1280,10 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                 # -------------------------------------- #
                 device['status'] = device_status
                 device['description'] = last_description
-                device['tempCapture'] = filename
 
-                if started:
-                    device['ovocCapture'] = 'active'
+                if rule_ready:
                     device['severity'] = 'NORMAL'
                 else:
-                    device['ovocCapture'] = 'not active'
                     device['severity'] = 'CRITICAL'
 
                 break
