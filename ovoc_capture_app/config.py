@@ -5,7 +5,7 @@
 # -------------- #
 # Script version #
 # -------------- #
-version = '1.0.1'
+version = '1.0.2'
 
 # ----------------------------------- #
 # Directory to store application logs #
@@ -51,3 +51,11 @@ listen_port = 20001
 # ------------------------------------------------------------------- #
 interface_name = 'ens192'
 
+# ------------------------------------------------------------------- #
+# OVOC user account for performing REST API commands to create SNMP   #
+# alarm forwarding rules. Only the username is stored in this config  #
+# file. The password must be entered interactively at the time the    #
+# script is run.                                                      #
+# NOTE: This value can be set via interactive entry from this script. #
+# ------------------------------------------------------------------- #
+ovoc_username = ''

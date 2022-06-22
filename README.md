@@ -21,6 +21,7 @@
 
 
 
+
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -69,6 +70,14 @@
 ---
 <details>
   <summary><h2>Change Log</h2></summary>
+
+## v1.0.2
+
+### Added or Changed
+- CPE capture script now registers all targeted CPE devices to their associated OVOC capture scripts.
+     This allows for the CPE script to not start captures if the OVOC server script isn't running as well.
+- The UDP socket is set for non-blocking to cycle through registration requests.
+- OVOC capture script now automatically sets up SNMP alarm forwarding rules for registered CPE devices.
 
 ## v1.0.1
 
@@ -134,89 +143,115 @@ CPE capture script                         OVOC capture server
        |                                           |
        |-------- CAPTURE <device address> -------->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
        |---- STOP <device address> <filename> ---->|
        |                                           |
-       |<-------- TRYING <device address> ---------|
+       |<------ 100 TRYING <device address> -------|
        |                                           |
-       |<------- OK | FAIL <device address> -------|
+       |<-------- 200 OK <device address> ---------|
        |                                           |
   ```
+
+If this script receives a request and the device address is not found in the
+devices information dictionary, then a `404 Not Found` is returned.
+
+If the capture fails to be started or fails to stop, then the response will
+be a `503 Service Unavailable`.
 
 The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
 
   ```sh
- {
-     "devices": [
-         {
-             "device": "<device ip address>",
-             "username": "<device REST API username>",
-             "password": "<device REST API password>",
-             "status": "Success|Failure",
-             "state": "active|not active",
-             "events": "Success|Failure",
-             "ovocState": "active|not active",
-             "description": "<some description>",
-             "lastRequest": "<some command request>",
-             "lastResponse": "<some command response>",
-             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
-             "tasks": [
-                 {
-                     "task": "<task name>",
-                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
-                     "status": "Success|Failure",
-                     "statusCode": <http response status code>,
-                     "output": "<CLI script execution>",
-                     "description": "<CLI script load status>",
-                 },
-                 ...
-                 <Next Task>
-             ]
-         },
-         ...
-         <Next Device>
-     ]
- }
- 
- For a 'Stop capture' task, the following item is added to the task items:
-                     "filename": "<capture filename>",
+  {
+      "devices": [
+          {
+              "device": "<device address>",
+              "status": "Success|Failure",
+              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+              "description": "<some descriptive text>",
+              "type": "MSBR|GWSBC",
+              "interfaces": [
+                  "eth-lan",
+                  <NEXT INTERFACE>
+              ],
+              "username": "<some username>",
+              "password": "*****",             <- Hidden password
+              "ovoc": "<associated OVOC address>",
+              "completed": true|false,
+              "tasks": [
+                  {
+                      "task": "<some task name>",
+                      "status": "Success|Fail",
+                      "statusCode": <some HTTP response code>,
+                      "description": "<some CLI descriptive text>",
+                      "timestamp": "2022-06-22T16:13:39.895358"
+
+                      <OTHER TASK SPECIFIC ITEMS, For instance>
+                      "output": "<some CLI output text>",
+                      "filename": "<stored CPE debug capture filename>",
+
+                  },
+
+                  <NEXT TASK>
+
+              ],
+              "cpeCapture": "active|not active",
+              "ovocCapture": "active|not active",
+              "registration": "active|not active|aborted",
+              "registerAttempts": <some value>,
+              "events": <some value>,
+              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastResponse": "<some response>",
+              "lastCapture": "<stored CPE capture filename>
+          },
+
+          <NEXT DEVICE>
+
+      ]
+  }
   ```
 
 The OVOC capture script `ovoc_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
 
   ```sh
- {
-     "devices": [
-         {
-             "device": "<device ip address>",
-             "status": "Success|Failure",
-             "state": "active|not active",
-             "description": "<some description>",
-             "lastCapture": "<last stopped capture filename>",
-             "lastRequest": "<some command request>",
-             "lastResponse": "<some command response>",
-             "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
-             "tasks": [
-                 {
-                     "task": "<task name>",
-                     "timestamp": "%Y-%m-%dT%H:%M:%S:%f%z",
-                     "status": "Success|Failure",
-                     "description": "<status information>",
-                 },
-                 ...
-                 <Next Task>
-             ]
-         },
-         ...
-         <Next Device>
-     ]
- }
- 
- For a 'Stop capture' task, the following item is added to the task items:
-                     "filename": "<capture filename>",
+  {
+      "devices": [
+          {
+              "device": "<device address>",
+              "status": "Success|Failure",
+              "severity": "NORMAL|MINOR|MAJOR|CRITICAL",
+              "description": "<some descriptive text>",
+              "tasks": [
+                  {
+                      "task": "<some task name>",
+                      "status": "Success|Fail",
+                      "statusCode": <some HTTP response code>,
+                      "description": "<some descriptive text>",
+                      "timestamp": "2022-06-22T16:13:39.895358"
+
+                      <OTHER TASK SPECIFIC ITEMS, For instance>
+                      "deviceId": <some value>
+                      "ruleId": <some value>
+                  }, 
+              ], 
+              "cpeFilename": "<filename of stored CPE capture file on CPE script>
+              "tempCapture": "<local tcpdump filename before renamed to match CPE filename>", 
+              "pid": "<some PID of tcpdump process>", 
+              "ovocCapture0": "<filename 1 from OVOC tcpdump capture that matches CPE filename>",
+              "ovocCapture1": "<filename 2 from OVOC tcpdump capture that matches CPE filename>",
+              "ovocCapture2": "<filename 3 from OVOC tcpdump capture that matches CPE filename>",
+              "registration": "active|not active",
+              "ovocCapture": "not active", 
+              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastResponse": "200 OK", 
+          },
+
+          <NEXT DEVICE>
+
+      ]
+  }
   ```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
@@ -266,10 +301,7 @@ On the OVOC servers hosting the capture script: `ovoc_capture_app.py`
 <div id="ovoc"></div>
 
 OVOC Server:
-* SNMP alarms must be manually configured to foward to the CPE capture script:
-
-<img src="images/alarm_fwd_select_devices.png" height="639"> <img src="images/alarm_fwd_select_alarm.png" height="639"> <img src="images/alarm_fwd_set_type_and_destination.png" height="639">
-
+* No prerequisties
 
 <br>
 
@@ -316,6 +348,10 @@ On the servers hosting the CPE capture script:
       
       ```sh
       python ovoc_capture_app.py
+
+      =================================================================================
+       Version: 1.0.2                 OVOC CAPTURE APP
+      =================================================================================
       ```
   
   
@@ -358,16 +394,60 @@ On the servers hosting the CPE capture script:
         - INFO: Set network interface name for captures to: [ens192]
       ```
 
+      In order to automatically create the SNMP alarm forwarding rules for each registering device, it's necessary to enter a valid `Operator` privilege user account on this OVOC server. The script will use REST API to automatically create and/or update any needed alarm forwarding rules on this OVOC server.
 
-      After the the interactive input, the script waits for `request` commands from the CPE capture app.
+      ```sh
+      :===============================================================================:
+      : OVOC account username and password that can be used for performing REST API   :
+      : requests. This script will use REST API to create the SNMP alarm forwarding   :
+      : needed for the CPE capture scripts.                                           :
+      :                                                                               :
+      : NOTE: The account used must have at least "Operator" security level.          :
+      :===============================================================================:
+      Enter OVOC account username: [ovoc_user] 
+        - INFO: Set OVOC account username to: [ovoc_user]
+        - Password: 
+          Confirm password: 
+          - INFO: Entered passwords match!
+        - INFO: Set OVOC account password
+      ```
+
+      After the the interactive input, the script waits for `request` commands from the CPE capture app. The following is an example of a full and successful capture session for a single CPE device.
   
       ```sh
       =================================================================================
-      Version: 1.0.1          OVOC NETWORK TRAFFIC CAPTURES
+                               OVOC NETWORK TRAFFIC CAPTURES
       =================================================================================
-      Start Time: 2022-06-19 15:35:59.388079
+      Start Time: 2022-06-22 21:13:16.638520
       ---------------------------------------------------------------------------------
-      Listening for command messages on UDP port: [20001]
+      Listening for script messaging on UDP port: [20001]
+      Received [REGISTER] request from CPE script controlling device: [192.168.200.218]
+        + Checking if OVOC is managing device: [192.168.200.218]
+          - INFO: CPE device exists on OVOC server
+        + Checking if device has existing SNMP alarm forwarding rule.
+          - ERROR: Failed to get SNMP alarm forwarding rule ID from OVOC server
+        + Creating SNMP alarm forwarding rule [Forward Connection Lost from 192.168.200.218] for device: [192.168.200.218]
+          - INFO: Successfully created SNMP alarm forwarding rule on OVOC server
+          - INFO: Registered device and setup alarm forwarding rule.
+        + Sending response for registering device on OVOC server: [200 OK 192.168.200.218]
+          - INFO: Sent response for registering device on OVOC server.
+      Received [CAPTURE] request from CPE script controlling device: [192.168.200.218]
+        + Sending [100 Trying] response for starting capture for device: [192.168.200.218]
+          - INFO: Sent response for starting capture on OVOC server.
+      Starting network traffic capture for CPE device #1: [192.168.200.218]
+        + Attempting to start tcpdump capture on CPE device...
+          - INFO: Started capture on device as file: [tmp_device_192.168.200.218_2022-06-22T21.13.44.269908.pcap]
+        + Sending response for starting capture on OVOC server: [200 OK 192.168.200.218]
+          - INFO: Sent response for starting capture on OVOC server.
+      Received [STOP] request from CPE script controlling device: [192.168.200.218]
+        + Sending [100 Trying] response for stopping capture for device: [192.168.200.218]
+          - INFO: Sent response for stopping capture on OVOC server.
+      Stopping network traffic capture for CPE device #1: [192.168.200.218]
+        + Attempting to stop tcpdump capture on CPE device...
+          - INFO: Stopped capture on device as file: [CPE_device_192.168.200.218_2022-06-22T16.16.07.565758.pcap]
+          - INFO: Successfully renamed capture file: [tmp_device_192.168.200.218_2022-06-22T21.13.44.269908.pcap0]
+        + Sending response for stopping capture on OVOC server: [200 OK 192.168.200.218]
+          - INFO: Sent response for stopping capture on OVOC server.
       ```
 <br>
 
@@ -380,6 +460,11 @@ On the servers hosting the CPE capture script:
       
       ```sh
       python3 cpe_capture_app.py
+
+      =================================================================================
+       Version: 1.0.2                 CPE CAPTURE APP
+      =================================================================================
+
       ```
   
       > **Note**
@@ -390,6 +475,21 @@ On the servers hosting the CPE capture script:
       > 
       > Error checking and validation is done on each input item. For IP address and FQDN entries, the entered value is validated before allowing you to enter other information. Also, you can not enter blank/empty passwords. A valid password is required. The entered passwords are not echoed to the screen and require confirmation. If the entered password and confirmed password do not match, you'll be prompted to try again.
       
+      You can limit the number of registration attempts for each CPE device to its associated OVOC capture app script. If the maximum attempts have been made without success, the script will abort any traffic captures for this device on this session of the script execution. The registration will fail if the OVOC capture app isn't running or if the SNMP alarm forwarding rule fails to be created or updated for this device.
+
+      ```sh
+      :===============================================================================:
+      : Maximum number of registration attempts allowed when sending connection       :
+      : requests to an OVOC capture app script. If the registration is unsuccessful,  :
+      : then no capture will be performed for the device that failed to register for  :
+      : this session of the CPE capture script.                                       :
+      :                                                                               :
+      : NOTE: Entered value should be in the range (1 - 25)                           :
+      :===============================================================================:
+      Enter CPE registration attempts: (1-25) [2] 
+        - INFO: Set CPE registration attempts to: [2]
+      ```
+
       The following example is an entry of a targeted MSBR device when there are no previously stored devices. After the `type` value is entered as `MSBR`, there are options for which interfaces you would like to capture on. You can select multiple interfaces for a capture session. In the example below, the `eth-wan` and `cellular-wan` interfaces are selected for this capture session.
       
       ```sh
@@ -552,27 +652,53 @@ On the servers hosting the CPE capture script:
         - INFO: Set OVOC alarm trigger events per device to: [1]
       ```     
 
-      After the entries are complete, the CPE capture script starts the debug capture on each targeted CPE device and then sends the `CAPTURE` command to the appropriate OVOC capture script app.
+      After the entries are complete, the CPE capture script starts the debug capture on each targeted CPE device and then sends the `CAPTURE` command to the appropriate OVOC capture script app. The following is an example of a full and successful capture session for a single CPE device.
       
       ```sh
       =================================================================================
-      Version: 1.0.1          CPE NETWORK TRAFFIC CAPTURES
+                               CPE NETWORK TRAFFIC CAPTURES
       =================================================================================
       Start Time:
       ---------------------------------------------------------------------------------
-      Starting network traffic capture on CPE device #1: [192.168.200.218]
-        + Attempting to start debug capture on CPE device...
+      Registering CPE devices to their associated OVOC capture scripts.
+        + Registering device [192.168.200.218] to OVOC capture script on server: [192.168.200.252]
+        + Sending message to OVOC capture script: [REGISTER 192.168.200.218]
+          - INFO: Sent registration request to OVOC capture script.
+      Listening for OVOC alarms and script messaging on UDP port: [20001]
+        + Received response [200 OK] from OVOC associated with device: [192.168.200.218]
+      Starting debug capture on CPE device #1: [192.168.200.218]
+        + Attempting to start debug capture...
         + Verifying debug capture started...
           - INFO: Debug capture is active.
         + Sending message to start capture on OVOC server: [CAPTURE 192.168.200.218]
         + Sending message to OVOC capture script: [CAPTURE 192.168.200.218]
-          - INFO: Successfully sent request to OVOC capture script.
-          - INFO: Successfully sent request to start capture on OVOC server.
-      Listening for OVOC alarms and command messages on UDP port: [20001]
-        + Received response [TRYING] from OVOC associated with device: [192.168.200.218]
-      Listening for OVOC alarms and command messages on UDP port: [20001]
-        + Received response [OK] from OVOC associated with device: [192.168.200.218]
-      Listening for OVOC alarms and command messages on UDP port: [20001]
+          - INFO: Sent request to start capture on OVOC server.
+        + Received response [100 Trying] from OVOC associated with device: [192.168.200.218]
+        + Received response [200 OK] from OVOC associated with device: [192.168.200.218]
+      Received [Connection Lost] alarm from OVOC associated with device: [192.168.200.218]
+      Stopping network traffic capture on CPE device #1: [192.168.200.218]
+        + Attempting to stop debug capture on CPE device...
+          - INFO: Successfully executed CLI script on device.
+        + Verifying debug capture stopped...
+          - INFO: Successfully executed CLI script on device.
+          - INFO: Debug capture is not active.
+      Retrieving network traffic capture from CPE device #1: [192.168.200.218]
+        + Attempting to retrieve debug capture file from CPE device...
+          - INFO: Stored capture from device as file: [CPE_device_192.168.200.218_2022-06-22T16.16.07.565758.pcap]
+        + Sending message to stop capture on OVOC server: [STOP 192.168.200.218 CPE_device_192.168.200.218_2022-06-22T16.16.07.565758.pcap]
+        + Sending message to OVOC capture script: [STOP 192.168.200.218 CPE_device_192.168.200.218_2022-06-22T16.16.07.565758.pcap]
+          - INFO: Sent request to stop capture on OVOC server.
+        + Received [Connection established] alarm from OVOC associated with device: [192.168.200.218]
+        + Received response [100 Trying] from OVOC associated with device: [192.168.200.218]
+        + Received response [200 OK] from OVOC associated with device: [192.168.200.218]
+        - INFO: All devices have completed
+      Finished
+      
+      =================================================================================
+                                    PROCESSING SUMMARY
+      =================================================================================
+      Completed:
+      Total Duration: 188.114 seconds
       ```
   
 
@@ -619,7 +745,7 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 [license-url]: https://github.com/dgrissom55/trafficCapture/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
-[product-screenshot]: images/capturing_flow_v1.0.1.png
+[product-screenshot]: images/capturing_flow_v1.0.2.png
 [select-devices-screenshot]: images/alarm_fwd_select_devices.png
 [select-alarms-screenshot]: images/alarm_fwd_select_alarm.png
 [select-destination-screenshot]: images/alarm_fwd_set_type_and_destination.png
