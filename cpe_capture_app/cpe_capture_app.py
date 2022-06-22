@@ -2219,6 +2219,7 @@ def register_devices(logger, log_id, server_socket, max_attempts, devices_info):
 # Parameters:                                                                 #
 #     logger        - File handler for storing logged actions                 #
 #     log_id        - Unique identifier for this devices log entries          #
+#     max_retries   - Max retry attempts allowed                              #
 #     server_socket - Network socket to use for sending request               #
 #     devices_info  - Dictionary of targeted devices                          #
 #                                                                             #
@@ -2227,33 +2228,33 @@ def register_devices(logger, log_id, server_socket, max_attempts, devices_info):
 #                    that contain all the tasks executed against each device. #
 #                    (Mutable dictionary passed by reference)                 #
 # --------------------------------------------------------------------------- #
-def start_captures(logger, log_id, server_socket, devices_info):
+def start_captures(logger, log_id, max_retries, server_socket, devices_info):
     """Start CPE captures for each device that is registered with an OVOC capture script."""
 
     for device in devices_info['devices']:
 
         if device['registration'] == 'active':
 
-            event = 'Starting captures on registered CPE devices.'
+            event = 'Checking captures on registered CPE devices.'
             logger.info('{} - {}'.format(log_id, event))
-            print('{}'.format(event))
+            #print('{}'.format(event))
 
-            # -------------------------------- #
-            # Start capture on this CPE device #
-            # -------------------------------- #
-            devices_info = start_capture(logger, log_id, this_device_address, devices_info)
+            if device['cpeCapture'] == 'not active' and not device['completed']:
 
-            if devices['cpeCapture'] == 'active':
+                # -------------------------------- #
+                # Start capture on this CPE device #
+                # -------------------------------- #
+                start_capture(logger, log_id, max_retries, device['device'], devices_info)
 
                 # ------------------------------------------------------- #
                 # Send CAPTURE command to OVOC capture app script to      #
                 # trigger it to start a 'tcpdump' capture on this device. #
                 # ------------------------------------------------------- #
-                this_request = 'CAPTURE {}'.format(this_device_address)
+                this_request = 'CAPTURE {}'.format(device['device'])
                 event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
-                if send_request(logger, log_id, server_socket, this_request, this_ovoc_address):
+                if send_request(logger, log_id, server_socket, this_request, device['ovoc']):
                     event = 'Sent request to start capture on OVOC server.'
                     logger.info('{} - {}'.format(log_id, event))
                     print('    - INFO: {}'.format(event))
@@ -2281,6 +2282,7 @@ def start_captures(logger, log_id, server_socket, devices_info):
 # Parameters:                                                                 #
 #     logger        - File handler for storing logged actions                 #
 #     log_id        - Unique identifier for this devices log entries          #
+#     max_retries   - Max retry attempts allowed                              #
 #     target_device - CPE device to start network traffic capture on          #
 #     devices_info  - Dictionary of targeted devices                          #
 #                                                                             #
@@ -2288,21 +2290,17 @@ def start_captures(logger, log_id, server_socket, devices_info):
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def start_capture(logger, log_id, target_device, devices_info):
+def start_capture(logger, log_id, max_retries, target_device, devices_info):
     """Start network traffic capture on specific device in the 'devices_info' dictionary."""
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
             logger.debug('{} - {}'.format(log_id, event))
-
-            this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
 
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
@@ -2311,27 +2309,31 @@ def start_capture(logger, log_id, target_device, devices_info):
             device_severity = ''
             last_description = ''
 
+            event = 'Starting debug capture on CPE device #{}: [{}]'.format(device_index + 1, target_device)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
             # ---------------------------------- #
             # Start debug capture on this device #
             # ---------------------------------- #
             submitted = False
             attempt = 1
-            while attempt <= config.max_retries and not submitted:
+            while attempt <= max_retries and not submitted:
 
                 # ---------------------------------------- #
                 # Attempt to start debug capture on device #
                 # ---------------------------------------- #
-                event = 'Attempting to start debug capture on CPE device #{}: [{}]'.format(device_index + 1, this_device_address)
+                event = 'Attempting to start debug capture...'
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                if devices_info['devices'][device_index]['type'] == 'MSBR':
+                if device['type'] == 'MSBR':
 
                     # ---------------------------------------------------------- #
                     # Build commands to start capture on defined MSBR interfaces #
                     # ---------------------------------------------------------- #
                     cli_script = 'debug capture data physical stop\n'
-                    for interface in devices_info['devices'][device_index]['interfaces']:
+                    for interface in device['interfaces']:
                         cli_script += 'debug capture data physical {}\n'.format(interface)
                     cli_script += 'debug capture data physical start\n'
 
@@ -2341,11 +2343,11 @@ def start_capture(logger, log_id, target_device, devices_info):
                     # Build commands to start capture on defined GW/SBC interfaces #
                     # ------------------------------------------------------------ #
                     cli_script = 'debug_capture voip physical stop\n'
-                    for interface in devices_info['devices'][device_index]['interfaces']:
+                    for interface in device['interfaces']:
                         cli_script += 'debug capture voip physical {}\n'.format(interface)
                     cli_script += 'debug_capture voip physical start\n'
 
-                start_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                start_capture_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
                 # ---------------------- #
                 # Store task information #
@@ -2353,7 +2355,7 @@ def start_capture(logger, log_id, target_device, devices_info):
                 start_capture_task['task'] = 'Start capture'
                 task_timestamp = datetime.now()
                 start_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                devices_info['devices'][device_index]['tasks'].append(start_capture_task.copy())
+                device['tasks'].append(start_capture_task.copy())
 
                 device_status = start_capture_task['status']
                 last_description = start_capture_task['description']
@@ -2381,7 +2383,7 @@ def start_capture(logger, log_id, target_device, devices_info):
             started = False
             if submitted:
                 attempt = 1
-                while attempt <= config.max_retries and not started:
+                while attempt <= max_retries and not started:
                     # --------------------------------- #
                     # Attempt to verify capture started #
                     # --------------------------------- #
@@ -2389,7 +2391,7 @@ def start_capture(logger, log_id, target_device, devices_info):
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
 
-                    if devices_info['devices'][device_index]['type'] == 'MSBR':
+                    if device['type'] == 'MSBR':
                         cli_script = """
 debug capture data physical show
                         """
@@ -2397,7 +2399,7 @@ debug capture data physical show
                         cli_script = """
 debug capture voip physical show
                         """
-                    verify_started_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                    verify_started_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
                     # --------------- #
                     # Display results #
@@ -2425,7 +2427,7 @@ debug capture voip physical show
                     verify_started_task['task'] = 'Verify started'
                     task_timestamp = datetime.now()
                     verify_started_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    devices_info['devices'][device_index]['tasks'].append(verify_started_task.copy())
+                    device['tasks'].append(verify_started_task.copy())
 
                     device_status = verify_started_task['status']
                     last_description = verify_started_task['description']
@@ -2435,15 +2437,15 @@ debug capture voip physical show
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
+            device['status'] = device_status
+            device['description'] = last_description
 
             if started:
-                devices_info['devices'][device_index]['cpeCapture'] = 'active'
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                device['cpeCapture'] = 'active'
+                device['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
-                devices_info['devices'][device_index]['severity'] = 'CRITICAL'
+                device['cpeCapture'] = 'not active'
+                device['severity'] = 'CRITICAL'
 
             break
 
@@ -2466,6 +2468,7 @@ debug capture voip physical show
 # Parameters:                                                                 #
 #     logger        - File handler for storing logged actions                 #
 #     log_id        - Unique identifier for this devices log entries          #
+#     max_retries   - Max retry attempts allowed                              #
 #     target_device - CPE device to start network traffic capture on          #
 #     devices_info  - Dictionary of targeted devices                          #
 #                                                                             #
@@ -2473,23 +2476,19 @@ debug capture voip physical show
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def stop_capture(logger, log_id, target_device, devices_info):
+def stop_capture(logger, log_id, max_retries, target_device, devices_info):
     """Stop network traffic capture on specific device in the 'devices' list."""
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
             logger.debug('{} - {}'.format(log_id, event))
 
-            this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
-
-            event = 'Stopping network traffic capture on CPE device #{}: [{}]'.format(device_index + 1, this_device_address)
+            event = 'Stopping network traffic capture on CPE device #{}: [{}]'.format(device_index + 1, target_device)
             logger.info('{} - {}'.format(log_id, event))
             print('{}'.format(event))
 
@@ -2505,7 +2504,7 @@ def stop_capture(logger, log_id, target_device, devices_info):
             # --------------------------------- #
             submitted = False
             attempt = 1
-            while attempt <= config.max_retries and not submitted:
+            while attempt <= max_retries and not submitted:
 
                 # --------------------------------------- #
                 # Attempt to stop debug capture on device #
@@ -2514,15 +2513,12 @@ def stop_capture(logger, log_id, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                if devices_info['devices'][device_index]['type'] == 'MSBR':
-                    cli_script = """
-debug capture data physical stop
-                    """
+                if device['type'] == 'MSBR':
+                    cli_script = 'debug capture data physical stop'
                 else:
-                    cli_script = """
-debug capture voip physical stop
-                    """
-                stop_capture_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                    cli_script = 'debug capture voip physical stop'
+
+                stop_capture_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
                 # ---------------------- #
                 # Store task information #
@@ -2530,7 +2526,7 @@ debug capture voip physical stop
                 stop_capture_task['task'] = 'Stop capture'
                 task_timestamp = datetime.now()
                 stop_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                devices_info['devices'][device_index]['tasks'].append(stop_capture_task.copy())
+                device['tasks'].append(stop_capture_task.copy())
 
                 device_status = stop_capture_task['status']
                 last_description = stop_capture_task['description']
@@ -2552,7 +2548,7 @@ debug capture voip physical stop
             stopped = False
             if submitted:
                 attempt = 1
-                while attempt <= config.max_retries and not stopped:
+                while attempt <= max_retries and not stopped:
                     # --------------------------------- #
                     # Attempt to verify capture stopped #
                     # --------------------------------- #
@@ -2560,15 +2556,12 @@ debug capture voip physical stop
                     logger.info('{} - {}'.format(log_id, event))
                     print('  + {}'.format(event))
 
-                    if devices_info['devices'][device_index]['type'] == 'MSBR':
-                        cli_script = """
-debug capture data physical show
-                        """
+                    if device['type'] == 'MSBR':
+                        cli_script = 'debug capture data physical show'
                     else:
-                        cli_script = """
-debug capture voip physical show
-                        """
-                    verify_stopped_task = send_cli_script(logger, log_id, cli_script, this_device_address, this_device_username, this_device_password)
+                        cli_script = 'debug capture voip physical show'
+
+                    verify_stopped_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
                     # --------------- #
                     # Display results #
@@ -2604,7 +2597,7 @@ debug capture voip physical show
                     verify_stopped_task['task'] = 'Verify stopped'
                     task_timestamp = datetime.now()
                     verify_stopped_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-                    devices_info['devices'][device_index]['tasks'].append(verify_stopped_task.copy())
+                    device['tasks'].append(verify_stopped_task.copy())
 
                     device_status = verify_stopped_task['status']
                     last_description = verify_stopped_task['description']
@@ -2614,15 +2607,15 @@ debug capture voip physical show
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
+            device['status'] = device_status
+            device['description'] = last_description
 
             if stopped:
-                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                device['cpeCapture'] = 'not active'
+                device['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['cpeCapture'] = 'active'
-                devices_info['devices'][device_index]['severity'] = 'MAJOR'
+                device['cpeCapture'] = 'active'
+                device['severity'] = 'MAJOR'
 
         device_index += 1
 
@@ -2642,6 +2635,7 @@ debug capture voip physical show
 # Parameters:                                                                 #
 #     logger        - File handler for storing logged actions                 #
 #     log_id        - Unique identifier for this devices log entries          #
+#     max_retries   - Max retry attempts allowed                              #
 #     target_device - CPE device to start network traffic capture on          #
 #     devices_info  - Dictionary of targeted devices                          #
 #                                                                             #
@@ -2649,21 +2643,17 @@ debug capture voip physical show
 #    devices_info - Modified dictionary containing a record for each device   #
 #                   that contains all the tasks executed against that device. #
 # --------------------------------------------------------------------------- #
-def retrieve_capture(logger, log_id, target_device, devices_info):
+def retrieve_capture(logger, log_id, max_retries, target_device, devices_info):
     """Retrieve the locally stored PCAP file on the device."""
 
     device_found = False
     device_index = 0
-    for this_device in devices_info['devices']:
-        if this_device['device'] == target_device:
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
 
             device_found = True
             event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
             logger.debug('{} - {}'.format(log_id, event))
-
-            this_device_address = this_device['device']
-            this_device_username = this_device['username']
-            this_device_password = this_device['password']
 
             # ------------------------------------------------------- #
             # Track information to summarize each devices info record #
@@ -2675,9 +2665,9 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
 
             retrieved = False
 
-            if this_device['cpeCapture'].lower() == 'not active':
+            if device['cpeCapture'].lower() == 'not active':
 
-                event = 'Retrieving network traffic capture from CPE device #{}: [{}]'.format(device_index + 1, this_device_address)
+                event = 'Retrieving network traffic capture from CPE device #{}: [{}]'.format(device_index + 1, target_device)
                 logger.info('{} - {}'.format(log_id, event))
                 print('{}'.format(event))
 
@@ -2685,7 +2675,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                 # Retrieve debug capture file stored on this device #
                 # ------------------------------------------------- #
                 attempt = 1
-                while attempt <= config.max_retries and not retrieved:
+                while attempt <= max_retries and not retrieved:
 
                     # -------------------------------------------------- #
                     # Attempt to retrieve debug capture file from device #
@@ -2705,7 +2695,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     #ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
                     try:
-                        ssh.connect(this_device_address, username=this_device_username, password=this_device_password)
+                        ssh.connect(target_device, username=device['username'], password=device['password'])
                         event = 'Connected to device'
                         logger.info('{} - {}'.format(log_id, event))
                         sftp = ssh.open_sftp()
@@ -2722,7 +2712,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                         # -------------------------------- #
                         file_timestamp = datetime.now()
                         file_timestamp = file_timestamp.strftime('%Y-%m-%dT%H.%M.%S.%f%z')
-                        filename = 'device_{}_{}.pcap'.format(this_device_address, file_timestamp)
+                        filename = 'device_{}_{}.pcap'.format(target_device, file_timestamp)
                         filename = re.sub(':', '.', filename)
                         filename = 'CPE_' + filename
                         retrieve_capture_task['filename'] = filename
@@ -2747,7 +2737,7 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
                     # ---------------------- #
                     # Store task information #
                     # ---------------------- #
-                    devices_info['devices'][device_index]['tasks'].append(retrieve_capture_task.copy())
+                    device['tasks'].append(retrieve_capture_task.copy())
                     device_status = retrieve_capture_task['status']
                     logger.debug('{} - {}'.format(log_id, device_status))
                     last_description = retrieve_capture_task['description']
@@ -2773,14 +2763,14 @@ def retrieve_capture(logger, log_id, target_device, devices_info):
             # -------------------------------------- #
             # Store task information at device level #
             # -------------------------------------- #
-            devices_info['devices'][device_index]['status'] = device_status
-            devices_info['devices'][device_index]['description'] = last_description
-            devices_info['devices'][device_index]['lastCapture'] = filename
+            device['status'] = device_status
+            device['description'] = last_description
+            device['lastCapture'] = filename
 
             if retrieved:
-                devices_info['devices'][device_index]['severity'] = 'NORMAL'
+                device['severity'] = 'NORMAL'
             else:
-                devices_info['devices'][device_index]['severity'] = 'CRITICAL'
+                device['severity'] = 'CRITICAL'
 
         device_index += 1
 
@@ -3239,11 +3229,6 @@ def main(argv):
         register_devices(logger, log_id, server_socket, max_reg_attempts, devices_info)
         time.sleep(2)
 
-        # -------------------------------------------- #
-        # Start captures on all registered CPE devices #
-        # -------------------------------------------- #
-        #start_captures(logger, log_id, server_socket, devices_info)
-
         # ------------------------------------------------ #
         # For debugging - Output 'devices_info' dictionary #
         # ------------------------------------------------ #
@@ -3263,11 +3248,11 @@ def main(argv):
             if device['completed'] == False:
                 devices_not_completed = True
 
-        while (devices_not_registered or devices_not_completed):
+        event = 'Listening for OVOC alarms and script messaging on UDP port: [{}]'.format(listen_port)
+        logger.info('{} - {}'.format(log_id, event))
+        print('{}'.format(event))
 
-            event = 'Listening for OVOC alarms and script messaging on UDP port: [{}]'.format(listen_port)
-            logger.info('{} - {}'.format(log_id, event))
-            print('{}'.format(event))
+        while (devices_not_registered or devices_not_completed):
 
             more_messages = True
             while more_messages:
@@ -3308,11 +3293,15 @@ def main(argv):
 
                             event = 'Received [{}] alarm from OVOC associated with device: [{}]'.format(msg_info['alarm'], device_with_alarm)
                             logger.info('{} - {}'.format(log_id, event))
-                            print('  + {}'.format(event))
+                            print('{}'.format(event))
 
                             device_events = 0
                             for device in devices_info['devices']:
                                 if device['device'] == device_with_alarm:
+
+                                    # ----------------------- #
+                                    # Increment event counter #
+                                    # ----------------------- #
                                     device['events'] += 1
                                     event = 'Incrementing events counter to: [{}]'.format(device['events'])
                                     logger.info('{} - {}'.format(log_id, event))
@@ -3321,12 +3310,12 @@ def main(argv):
                                     # -------------------------- #
                                     # Stop capture on CPE device #
                                     # -------------------------- #
-                                    devices_info = stop_capture(logger, log_id, device_with_alarm, devices_info)
+                                    stop_capture(logger, log_id, max_retries, device_with_alarm, devices_info)
 
                                     # ------------------------------------- #
                                     # Retrieve capture file from CPE device #
                                     # ------------------------------------- #
-                                    devices_info = retrieve_capture(logger, log_id, device_with_alarm, devices_info)
+                                    retrieve_capture(logger, log_id, max_retries, device_with_alarm, devices_info)
 
                                     # ------------------------------------------------------ #
                                     # Send STOP command to OVOC capture app script to        #
@@ -3345,6 +3334,7 @@ def main(argv):
                                         # Save this command request in 'devices_info' dictionary #
                                         # ------------------------------------------------------ #
                                         device['lastRequest'] = 'STOP'
+                                        time.sleep(3)
 
                                     else:
                                         event = 'Failed to send request to stop capture on OVOC server!'
@@ -3357,12 +3347,12 @@ def main(argv):
                                     # 'max_events_per_device' defined in the 'config.py' #
                                     # file, start another capture for this device.       #
                                     # -------------------------------------------------- #
-                                    if device_events < config.max_events_per_device:
+                                    #if device_events < max_events_per_device:
 
-                                        # ---------------------------------- #
-                                        # Restart capture on this CPE device #
-                                        # ---------------------------------- #
-                                        devices_info = start_capture(logger, log_id, device['device'], devices_info)
+                                    #    # ---------------------------------- #
+                                    #    # Restart capture on this CPE device #
+                                    #    # ---------------------------------- #
+                                    #    start_capture(logger, log_id, max_retries, device['device'], devices_info)
 
                                     break
 
@@ -3421,15 +3411,28 @@ def main(argv):
                                 # the 'tcpdump' for the device.                  #
                                 # ---------------------------------------------- #
                                 if this_response == '200 OK' and device['lastRequest'] == 'STOP':
+
+                                    # --------------------------------- #
+                                    # Update OVOC tcpdump capture state #
+                                    # --------------------------------- #
                                     device['ovocCapture'] = 'not active'
 
-                                    if device['events'] == config.max_events_per_device:
+                                    if device['events'] == max_events_per_device:
                                         device['completed'] = True
 
                     else:
                         event = 'Received unknown message to process! Check logs for details.'
                         logger.warning('{} - {}'.format(log_id, event))
                         print('  + WARNING: {}'.format(event))
+
+            event = 'Processed all buffered messages'
+            logger.debug('{} - {}'.format(log_id, event))
+
+            # ------------------------------------------------ #
+            # For debugging - Output 'devices_info' dictionary #
+            # ------------------------------------------------ #
+            event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
+            logger.debug('{} - {}'.format(log_id, event))
 
             # ---------------------------------------------------------- #
             # Check if any devices need to have their REGISTER requests  #
@@ -3441,7 +3444,7 @@ def main(argv):
             # Check if any devices need to have their captures #
             # started on all registered CPE devices.           #
             # ------------------------------------------------ #
-            start_captures(logger, log_id, server_socket, devices_info)
+            start_captures(logger, log_id, max_retries, server_socket, devices_info)
 
             # ---------------------------------------------------------- #
             # Continue listening for OVOC alarms or script messaging if  #
@@ -3462,18 +3465,12 @@ def main(argv):
 
             sleep_time = 2
             if not_registered_cnt == 0 and not_completed_cnt > 0:
-                sleep_time = 30
+                sleep_time = 5
 
             # ---------------------------------------------- #
             # Sleep before next loop to receive UDP messages #
             # ---------------------------------------------- #
             time.sleep(sleep_time)
-
-            # ------------------------------------------------ #
-            # For debugging - Output 'devices_info' dictionary #
-            # ------------------------------------------------ #
-            event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
-            logger.debug('{} - {}'.format(log_id, event))
 
         event = 'All devices have completed'
         logger.info('{} - {}'.format(log_id, event))

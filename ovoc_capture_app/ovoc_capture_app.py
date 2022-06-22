@@ -385,11 +385,16 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
     rest.setopt(rest.HTTPAUTH, 1)
     rest.setopt(rest.USERPWD, username + ':' + password)
     rest.setopt(rest.CONNECTTIMEOUT, 5)
+    rest.setopt(rest.TIMEOUT, 3)
 
     if method == 'POST':
         rest.setopt(rest.POST, True)
     if method == 'PUT':
-        rest.setopt(rest.PUT, True)
+        rest.setopt(rest.POST, True)
+        rest.setopt(rest.CUSTOMREQUEST, 'PUT')
+    if method == 'DELETE':
+        #rest.setopt(rest.DELETE, True)
+        rest.setopt(rest.CUSTOMREQUEST, 'DELETE')
     if method == 'GET':
         rest.setopt(rest.HTTPGET, True)
 
@@ -411,7 +416,8 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
 
         if data_type == 'json':
             headers.append('Content-Type: application/json')
-            body = body + json.dumps(data)
+            #body = body + json.dumps(data)
+            body = body + data
 
         headers.append('content-length: ' + str(len(body)))
         rest.setopt(rest.POSTFIELDS, body)
@@ -422,7 +428,6 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
     response.status_code = 0
     response.reason = ''
     response.text = ''
-    #response.headers['Content-Type'] = ''
 
     try:
         rest.perform()
@@ -442,13 +447,10 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
 
         rest.close()
 
-        print('Resp_Headers:\n{}'.format(resp_headers))
         response.headers = resp_headers.copy()
-        print('Response Headers:\n{}'.format(response.headers))
+        #print('Response Headers:\n{}'.format(response.headers))
 
     except pycurl.error as err:
-        #response.status_code = err.args[0]
-        #response.reason = err.args[1]
         return str(err)
 
     else:
@@ -1211,7 +1213,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                     if device_status.lower() == 'success':
                         print('    - INFO: {}'.format(event))
                     else:
-                        print('    - ERROR: {}'.format(event))
+                        print('    - INFO: {}'.format(event))
 
                     # ---------------------------- #
                     # Create new rule if not found #
@@ -1239,10 +1241,10 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         # --------------- #
                         event = create_fwd_rule_task['description']
                         if create_fwd_rule_task['status'].lower() == 'success':
-                            print('  + INFO: {}'.format(event))
+                            print('    - INFO: {}'.format(event))
                             rule_ready = True
                         else:
-                            print('  + CRITICAL: {}'.format(event))
+                            print('    - CRITICAL: {}'.format(event))
 
                     # -------------------- #
                     # Update existing rule #
@@ -1251,7 +1253,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
 
                         event = 'Updating SNMP alarm forwarding rule [{}] for device: [{}]'.format(rule_name, target_device)
                         logger.info('{} - {}'.format(log_id, event))
-                        print('{}'.format(event))
+                        print('  + {}'.format(event))
 
                         update_fwd_rule_task = update_fwd_rule(logger, log_id, get_fwd_rule_task['ruleId'], get_device_task['deviceId'], address, port, alarm_list, credentials)
 
@@ -1270,10 +1272,10 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
                         # --------------- #
                         event = update_fwd_rule_task['description']
                         if update_fwd_rule_task['status'].lower() == 'success':
-                            print('  + INFO: {}'.format(event))
+                            print('    - INFO: {}'.format(event))
                             rule_ready = True
                         else:
-                            print('  + WARNING: {}'.format(event))
+                            print('    - WARNING: {}'.format(event))
 
                 # -------------------------------------- #
                 # Store task information at device level #
@@ -2092,10 +2094,10 @@ def get_ovoc_account(logger, log_id):
 def process_register(logger, log_id, server_socket, sendto_address, target_device, credentials, devices_info):
     """Process REGISTER request from CPE capture script."""
 
-    # --------------------------------------------------------------- #
-    # Register device by adding a record in 'devices_info' dictionary #
-    # --------------------------------------------------------------- #
-    device_index = register_device(logger, log_id, target_device, devices_info)
+    # ---------------------------------------------------------------------- #
+    # Setup device by adding a record in 'devices_info' dictionary if needed #
+    # ---------------------------------------------------------------------- #
+    device_index = setup_device(logger, log_id, target_device, devices_info)
 
     for device in devices_info['devices']:
         if device['device'] == target_device:
@@ -2111,7 +2113,7 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
             # named according to the SNMP OID name. Refer to the     #
             # OVOC Alarms Monitoring Guide for mapping alarm names.  #
             # ------------------------------------------------------ #
-            rule_name = 'Forward Connection Lost - {}'.format(target_device)
+            rule_name = 'Forward Connection Lost from {}'.format(target_device)
             alarm_list = ['acEMSNodeConnectionLostAlarm']
             rule_ready = set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sendto_address, credentials, devices_info)
 
@@ -2121,9 +2123,16 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
                 # ----------------------------------------------- #
                 this_response = '200 OK {}'.format(target_device)
                 response_type = '200 OK'
+                device['registration'] = 'active'
+                event = 'Registered device and setup alarm forwarding rule.'
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
             else:
                 this_response = '503 Service Unavailable {}'.format(target_device)
                 response_type = '503 Service Unavailable'
+                event = 'Failed to registered device and setup alarm forwarding rule.'
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
 
             event = 'Sending response for registering device on OVOC server: [{}]'.format(this_response)
             logger.info('{} - {}'.format(log_id, event))
@@ -2231,7 +2240,7 @@ def process_capture(logger, log_id, server_socket, sendto_address, target_device
             # ----------------------------------------- #
             start_capture(logger, log_id, target_device, interface_name, devices_info)
 
-            if devices['ovocCapture'].lower() == 'active':
+            if device['ovocCapture'].lower() == 'active':
                 # ----------------------------------------------- #
                 # Send 200 OK response to CPE capture app script. #
                 # ----------------------------------------------- #
@@ -3181,7 +3190,7 @@ def parse_message(logger, log_id, message):
     return msg_info
 
 # --------------------------------------------------------------------------- #
-# FUNCTION: register_device                                                   #
+# FUNCTION: setup_device                                                      #
 #                                                                             #
 # Search for target device in records of 'devices_info' dictionary and return #
 # the index if found and if not found create a new record and return the new  #
@@ -3196,7 +3205,7 @@ def parse_message(logger, log_id, message):
 # Return:                                                                     #
 #     device_index - Index of device record in 'devices_info' dictionary      #
 # --------------------------------------------------------------------------- #
-def register_device(logger, log_id, target_device, devices_info):
+def setup_device(logger, log_id, target_device, devices_info):
     """Return the index of the device record in the 'devices_info' dictionary."""
 
     device_index = -1
@@ -3227,6 +3236,7 @@ def register_device(logger, log_id, target_device, devices_info):
         devices_info['devices'].append({})
         device_index = len(devices_info['devices']) - 1
         devices_info['devices'][device_index]['device'] = target_device
+        devices_info['devices'][device_index]['registration'] = 'not active'
         devices_info['devices'][device_index]['tasks'] = []
 
         # ------------------------------------------------------ #
@@ -3236,7 +3246,7 @@ def register_device(logger, log_id, target_device, devices_info):
         # ------------------------------------------------------ #
         devices_info['devices'][device_index]['ovocCapture'] = 'not active'
 
-        event = 'Created new CPE record for device: [{}]'.format(target_device)
+        event = 'Created new record for CPE device: [{}]'.format(target_device)
         logger.info('{} - {}'.format(log_id, event))
 
         event = 'Created new device in devices information dictionary at index: [{}]'.format(device_index)
@@ -3584,7 +3594,7 @@ def main(argv):
                 target_device = msg_info['device']
                 event = 'Received [{}] request from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
                 logger.info('{} - {}'.format(log_id, event))
-                print('  + {}'.format(event))
+                print('{}'.format(event))
 
                 # ------------------------------------------------- #
                 # Get index for device in 'devices_info' dictionary #
