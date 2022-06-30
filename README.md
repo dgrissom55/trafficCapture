@@ -290,7 +290,7 @@ On the servers hosting the CPE capture script: `cpe_capture_app.py`
   > 
   > CPE devices will need to allow access to TCP port 22.
   ```sh
-  pip3 install requests
+  pip3 install paramiko
   ```
 <br>
 
