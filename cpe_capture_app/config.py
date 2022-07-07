@@ -5,7 +5,7 @@
 # -------------- #
 # Script version #
 # -------------- #
-version = '1.0.2'
+version = '1.0.3'
 
 # ----------------------------------- #
 # Directory to store application logs #
@@ -56,7 +56,7 @@ max_reg_attempts = 2
 # Max retries for failed REST API requests.                           #
 # NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
-max_retries = 10
+max_retries = 5
 
 # ------------------------------------------------------------------- #
 # Max events per device. After the max events have been triggered on  #

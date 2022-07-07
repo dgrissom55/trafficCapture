@@ -2265,29 +2265,36 @@ def start_captures(logger, log_id, max_retries, server_socket, devices_info):
                 # -------------------------------- #
                 start_capture(logger, log_id, max_retries, device['device'], devices_info)
 
-                # ------------------------------------------------------- #
-                # Send CAPTURE command to OVOC capture app script to      #
-                # trigger it to start a 'tcpdump' capture on this device. #
-                # ------------------------------------------------------- #
-                this_request = 'CAPTURE {}'.format(device['device'])
-                event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
-                logger.info('{} - {}'.format(log_id, event))
-                print('  + {}'.format(event))
-                if send_request(logger, log_id, server_socket, this_request, device['ovoc']):
-                    event = 'Sent request to start capture on OVOC server.'
+                if device['cpeCapture'] == 'active':
+
+                    # ------------------------------------------------------- #
+                    # Send CAPTURE command to OVOC capture app script to      #
+                    # trigger it to start a 'tcpdump' capture on this device. #
+                    # ------------------------------------------------------- #
+                    this_request = 'CAPTURE {}'.format(device['device'])
+                    event = 'Sending message to start capture on OVOC server: [{}]'.format(this_request)
                     logger.info('{} - {}'.format(log_id, event))
-                    print('    - INFO: {}'.format(event))
+                    print('  + {}'.format(event))
+                    if send_request(logger, log_id, server_socket, this_request, device['ovoc']):
+                        event = 'Sent request to start capture on OVOC server.'
+                        logger.info('{} - {}'.format(log_id, event))
+                        print('    - INFO: {}'.format(event))
 
-                    # ------------------------------------------------------ #
-                    # Save this command request in 'devices_info' dictionary #
-                    # ------------------------------------------------------ #
-                    device['lastRequest'] = 'CAPTURE'
+                        # ------------------------------------------------------ #
+                        # Save this command request in 'devices_info' dictionary #
+                        # ------------------------------------------------------ #
+                        device['lastRequest'] = 'CAPTURE'
 
+                    else:
+                        event = 'Failed to send request to start capture on OVOC server!'
+                        logger.error('{} - {}'.format(log_id, event))
+                        print('    - ERROR: {}'.format(event))
+                        device['lastRequest'] = ''
                 else:
-                    event = 'Failed to send request to start capture on OVOC server!'
+                    device['completed'] = True
+                    event = 'Failed to start capture on device!'
                     logger.error('{} - {}'.format(log_id, event))
                     print('    - ERROR: {}'.format(event))
-                    device['lastRequest'] = ''
 
     return
 
