@@ -2395,7 +2395,7 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
 
                 try:
                     os.kill(int(pid), 0)
-                except OSError:
+                except OSError as err:
                     event = '{}'.format(err)
                     logger.error('{} - {}'.format(log_id, event))
                     start_capture_task['status'] = 'Failure'
@@ -2649,7 +2649,7 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
 
                     try:
                         os.kill(int(pid), 15)
-                    except OSError:
+                    except OSError as err:
                         event = '{}'.format(err)
                         logger.error('{} - {}'.format(log_id, event))
                         stop_capture_task['status'] = 'Failure'
@@ -2899,7 +2899,7 @@ def abort_capture(logger, log_id, target_device, devices_info):
 
                     try:
                         os.kill(int(pid), 15)
-                    except OSError:
+                    except OSError as err:
                         event = '{}'.format(err)
                         logger.error('{} - {}'.format(log_id, event))
                         abort_capture_task['status'] = 'Failure'
