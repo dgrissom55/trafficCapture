@@ -61,7 +61,19 @@ The following messages are exchanged:
 
   CPE script                                 This script
        |                                           |
+       |-------- REGISTER <device address> ------->|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
        |-------- CAPTURE <device address> -------->|
+       |                                           |
+       |<------ 100 TRYING <device address> -------|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
+       |     (WAIT FOR CONNECTION LOST EVENT)      |
+       |                                           |
+       |--------- VERIFY <device address> -------->|
        |                                           |
        |<------ 100 TRYING <device address> -------|
        |                                           |
@@ -463,6 +475,146 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
 
     else:
         return response
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: send_cli_script                                                   #
+#                                                                             #
+# Submit a REST API request to a device to execute the desired CLI script.    #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger   - File handler for storing logged actions                      #
+#     log_id   - Unique identifier for this devices log entries               #
+#     script   - CLI script to execute on device in TEXT format               #
+#     device   - Address of CPE device to run script on                       #
+#     username - Username for account on CPE device                           #
+#     password - Password for account on CPE device                           #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following items:                   #
+#        status      - String: 'Success' or 'Fail'                            #
+#        statusCode  - Integer: REST response status code. (Ex: 200)          #
+#        output      - Detailed information of execution of CLI script        #
+#        description - String: Description of the task action                 #
+# --------------------------------------------------------------------------- #
+def send_cli_script(logger, log_id, script, device, username, password):
+    """Submit REST API PUT request to execute CLI script on device."""
+
+    # ------------------------------------------- #
+    # Create a dictionary to hold the relevant    #
+    # information to return for the current task. #
+    # ------------------------------------------- #
+    task_info = {}
+    task_info['status'] = 'Failure'
+    task_info['statusCode'] = -1
+    task_info['output'] = ''
+    task_info['description'] = ''
+
+    # -------------------------------------------------------- #
+    # The body of the REST API request is made up of the plain #
+    # text file part.                                          #
+    # -------------------------------------------------------- #
+    file_contents = {'file': ('cli.txt', script)}
+    event = 'REST API CLI Script:\n{}'.format(json.dumps(file_contents, indent=4))
+    logger.info('{} - {}'.format(log_id, event))
+
+    # ---------------- #
+    # Set REST API URL #
+    # ---------------- #
+    url = "https://" + device + "/api/v1/files/cliScript/incremental"
+
+    event = 'Method [PUT] - Request URL: {}'.format(url)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # -------------------------------- #
+    # Send REST request to OVOC server #
+    # -------------------------------- #
+    rest_response = send_rest('PUT', url, username, password, file_contents, 'files')
+    rest_response_data = ''
+    if type(rest_response) is str:
+        rest_response_data = rest_response
+        event = 'REST Request Error: {}'.format(rest_response_data)
+        logger.error('{} - {}'.format(log_id, event))
+
+        # ------------- #
+        # Set task info #
+        # ------------- #
+        task_info['description'] = event
+
+        event = 'REST request failed. Could not send CLI script to device.'
+        logger.error('{} - {}'.format(log_id, event))
+    else:
+        if 'Content-Type' in rest_response.headers:
+            if re.search('application/json', rest_response.headers['Content-Type']):
+                rest_response_data = {}
+                if len(rest_response.text) > 0:
+                    rest_response_data = json.loads(rest_response.text)
+                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                rest_response_data = rest_response.text
+                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
+                logger.info('{} - {}'.format(log_id, event))
+        else:
+            rest_response_data = rest_response.text
+            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
+            logger.info('{} - {}'.format(log_id, event))
+
+        if rest_response.status_code == 200:
+            # --------------------------------------- #
+            # Status Code 200 - CLI script was loaded #
+            # --------------------------------------- #
+            if 'status' in rest_response_data:
+                if rest_response_data['status'].lower() == 'success':
+
+                    # ------------------------------------------ #
+                    # Successfully executed CLI script on device #
+                    # ------------------------------------------ #
+                    event = 'Successfully executed CLI script on device.'
+                    logger.info('{} - {}'.format(log_id, event))
+
+                else:
+
+                    # ------------------------------------- #
+                    # CLI script execution failed on device #
+                    # ------------------------------------- #
+                    event = 'CLI script execution failed on device.'
+                    logger.error('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['status'] = rest_response_data['status'].capitalize()
+                task_info['statusCode'] = rest_response.status_code
+                task_info['output'] = rest_response_data['output']
+                task_info['description'] = event
+
+            else:
+                event = 'Response status was 200, but unable to extract CLI execution status!'
+                logger.warning('{} - {}'.format(log_id, event))
+
+                # ------------- #
+                # Set task info #
+                # ------------- #
+                task_info['description'] = event
+
+        else:
+            # ---------------------------------------------- #
+            # REST request to this device was not successful #
+            # ---------------------------------------------- #
+            if 'description' in rest_response_data:
+                event = '{}'.format(rest_response_data['description'])
+                logger.error('{} - {}'.format(log_id, event))
+            else:
+                event = 'Unexpected response received from device. Status code: [{}]'.format(rest_response.status_code)
+                logger.error('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['status_code'] = rest_response.status_code
+            task_info['description'] = event
+
+    return task_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: get_address_type                                                  #
@@ -1071,8 +1223,8 @@ def create_fwd_rule(logger, log_id, rule_name, device_id, address, port, alarm_l
 # --------------------------------------------------------------------------- #
 # FUNCTION: set_alarm_fwd_rule                                                #
 #                                                                             #
-# Check to see  API request to create a new SNMP alarm forwarding rule on     #
-# this OVOC server.                                                           #
+# Check if a new SNMP alarm forwarding rule needs to be created or not on     #
+# this OVOC server. If not rule exists for this target device, create one.    #
 #                                                                             #
 # Parameters:                                                                 #
 #     logger         - File handler for storing logged actions                #
@@ -1105,7 +1257,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
 
     # ------------------------------------------ #
     # If setting up a global forwarding rule not #
-    # associated with any targted devices.       #
+    # associated with any targeted devices.      #
     # ------------------------------------------ #
     if target_device == '':
 
@@ -1150,7 +1302,7 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
 
     # ------------------------------------------ #
     # If setting up a device specific forwarding #
-    # rule associated with a targted devices.    #
+    # rule associated with a targeted devices.   #
     # ------------------------------------------ #
     else:
         device_found = False
@@ -1301,6 +1453,8 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
             device_index += 1
 
         if not device_found:
+            device['status'] = 'Failure'
+            device['severity'] = 'CRITICAL'
             event = 'Device not found in monitored devices list!'
             logger.error('{} - {}'.format(log_id, event))
             print('  + ERROR: {}'.format(event))
@@ -1383,6 +1537,249 @@ def secure_json_dump(logger, log_id, devices_info, mask_list):
     logger.debug('{} - {}'.format(log_id, event))
 
     return json_dump
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: send_traffic                                                      #
+#                                                                             #
+# This function sends three types of network traffic to the targeted CPE      #
+# device once a Connection Lost event is received. The ICMP traffic and the   #
+# SNMP v3 GET requests are sent in parallel. TCP traffic is generated by      #
+# sending multiple connection attempts to the CPE on port 22 simulating an    #
+# SSH login attempt.                                                          #
+#                                                                             #
+# This function will wait until all the traffic has been sent to the device   #
+# before returning.                                                           #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger        - File handler for storing logged actions                 #
+#     log_id        - Unique identifier for this devices log entries          #
+#     target_device - CPE device to start network traffic capture on          #
+#     devices_info  - Dictionary of targeted devices                          #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def send_traffic(logger, log_id, target_device, devices_info):
+    """Generate ICMP, SNMP, and TCP traffic to send to the target CPE device."""
+
+    device_found = False
+    device_index = 0
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
+
+            device_found = True
+            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+            logger.debug('{} - {}'.format(log_id, event))
+
+            event = 'Sending network traffic to CPE device #{}: [{}]'.format(device_index + 1, target_device)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
+            device_status = ''
+            device_severity = ''
+            description = ''
+
+            # ------------------------------------------------------ #
+            # List to hold the objects returned from the calls to    #
+            # 'subprocess' below for the ICMP and SNMP traffic. Will #
+            # be used to wait for those spawned processes to finish. #
+            # ------------------------------------------------------ #
+            processes = []
+
+            DEVNULL = open(os.devnull, 'w')
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_icmp_task = {}
+            send_icmp_task['task'] = 'Send ICMP (Ping)'
+            send_icmp_task['status'] = 'Failure'
+            send_icmp_task['statusCode'] = -1
+            send_icmp_task['output'] = ''
+            send_icmp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_icmp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ------------------------------------ #
+            # Send ICMP pings to the target device #
+            # ------------------------------------ #
+            event = 'Sending 10 ICMP pings to target CPE device...'
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            command = 'ping -c 10 {}'.format(target_device)
+            icmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+            processes.append(icmp_process)
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_snmp_task = {}
+            send_snmp_task['task'] = 'Send UDP (SNMP v3)'
+            send_snmp_task['status'] = 'Failure'
+            send_snmp_task['statusCode'] = -1
+            send_snmp_task['output'] = ''
+            send_snmp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_snmp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ----------------------------------- #
+            # Send SNMP v3 request to get system  #
+            # description from the target device. #
+            # ----------------------------------- #
+            event = 'Sending 5 SNMP v3 GET requests for sysDescr.0 to target CPE device...'
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            command = 'for i in {1..5}; do snmpget -v 3 -n "" -u CaptureScript -a SHA -l authPriv -A Capture01! -X Capture01! -x AES {} sysDescr.0; sleep 1; done'.format(target_device)
+            snmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+            processes.append(snmp_process)
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_tcp_task = {}
+            send_tcp_task['task'] = 'Send TCP (SSH)'
+            send_tcp_task['status'] = 'Failure'
+            send_tcp_task['statusCode'] = -1
+            send_tcp_task['output'] = ''
+            send_tcp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_tcp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ------------------------------------ #
+            # Send TCP connection attempts to port #
+            # 22 on target device.                 #
+            # ------------------------------------ #
+            event = 'Sending 2 TCP connection requests to port 22 on target CPE device...'.format(max_retries)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            attempt = 1
+            while attempt <= 2:
+
+                # ---------------------------------------------- #
+                # Attempt to connect to port 22 on target device #
+                # ---------------------------------------------- #
+                event = 'Attempting to connect to port 22 on CPE device...'
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + {}'.format(event))
+
+                try:
+                    socket.setdefaulttimeout(2)
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect((target_device, 22))
+                except Exception as error:
+                    event = 'Error: ' + str(error)
+                    logger.error('{} - {}'.format(log_id, event))
+                    send_tcp_task['description'] = error
+                else:
+                    event = 'TCP connection established'
+                    logger.info('{} - {}'.format(log_id, event))
+                    send_tcp_task['description'] = error
+                    s.close()
+
+                attempt += 1
+
+            # -------------------------------------------------------- #
+            # Wait for spawned tasks to complete if necessary and get  #
+            # their shell status. Status '0' means the spawned process #
+            # executed with no errors.                                 #
+            # -------------------------------------------------------- #
+            results = [p.wait() for p in processes]
+
+            # ---------------------------------------------------- #
+            # Result [0] is associated with the first ICMP process #
+            # ---------------------------------------------------- #
+            if results[0] == 0:
+                send_icmp_task['status'] = 'Success'
+                send_icmp_task['statusCode'] = 0
+                send_icmp_task['description'] = 'Sent ICMP pings to device.'
+            else:
+                send_icmp_task['statusCode'] = results[0]
+                send_icmp_task['description'] = 'Failed to send ICMP pings to device!'
+
+            # ----------------------------------------------------- #
+            # Result [1] is associated with the second SNMP process #
+            # ----------------------------------------------------- #
+            if results[1] == 0:
+                send_snmp_task['status'] = 'Success'
+                send_snmp_task['statusCode'] = 0
+                send_snmp_task['description'] = 'Sent SNMP v3 requests to device.'
+            else:
+                send_snmp_task['statusCode'] = results[0]
+                send_snmp_task['description'] = 'Failed to send SNMP v3 requests to device!'
+
+            # --------------- #
+            # Display results #
+            # --------------- #
+            device_status = 'Success'
+            sent_icmp = True
+            event = send_icmp_task['description']
+            if send_icmp_task['status'].lower() == 'success':
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+            else:
+                sent_icmp = False
+                device_status = 'Failure'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+            device['tasks'].append(send_icmp_task.copy())
+
+            sent_snmp = True
+            event = send_snmp_task['description']
+            if send_snmp_task['status'].lower() == 'success':
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+            else:
+                sent_snmp = False
+                device_status = 'Failure'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+            device['tasks'].append(send_snmp_task.copy())
+
+            sent_tcp = True
+            event = send_tcp_task['description']
+            if send_tcp_task['status'].lower() == 'success':
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+            else:
+                sent_tcp = False
+                device_status = 'Failure'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+            device['tasks'].append(send_tcp_task.copy())
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            device['status'] = device_status
+            device['description'] = send_icmp_task['description'] + ' ' + send_snmp_task['description'] + ' ' + send_tcp_task['description']
+
+            if sent_icmp and sent_snmp and sent_tcp:
+                device['severity'] = 'NORMAL'
+            else:
+                device['severity'] = 'CRITICAL'
+
+            break
+
+        device_index += 1
+
+    if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
+
+    return
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: update_listen_port                                                #
@@ -2132,13 +2529,13 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
                 this_response = '200 OK {}'.format(target_device)
                 response_type = '200 OK'
                 device['registration'] = 'active'
-                event = 'Registered device and setup alarm forwarding rule.'
+                event = 'Registered device and setup SNMP configuration and alarm forwarding rule.'
                 logger.info('{} - {}'.format(log_id, event))
                 print('    - INFO: {}'.format(event))
             else:
                 this_response = '503 Service Unavailable {}'.format(target_device)
                 response_type = '503 Service Unavailable'
-                event = 'Failed to registered device and setup alarm forwarding rule.'
+                event = 'Failed to registered device and setup SNMP configuration and alarm forwarding rule.'
                 logger.info('{} - {}'.format(log_id, event))
                 print('    - INFO: {}'.format(event))
 
@@ -2306,6 +2703,126 @@ def process_capture(logger, log_id, server_socket, sendto_address, target_device
     return
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: process_verify                                                    #
+#                                                                             #
+# Process a VERIFY request from a CPE capture script. This is the trigger to  #
+# generate and send ICMP, SNMP, and TCP traffic to the device. This message   #
+# is received from the CPE capture script after a Connection Lost event has   #
+# been triggered by an OVOC server for a targeted CPE device.                 #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     server_socket  - Network socket object currenly bound to                #
+#     sendto_address - Tuple of address/port of CPE capture app to send resp  #
+#     target_device  - CPE device to start network traffic capture on         #
+#     devices_info   - Dictionary of targeted devices                         #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def process_verify(logger, log_id, server_socket, sendto_address, target_device, devices_info):
+    """Process VERIFY request from CPE capture script."""
+
+    device_found = False
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
+
+            device_found = True
+
+            # ---------------------------------------------- #
+            # Save this request in 'devices_info' dictionary #
+            # ---------------------------------------------- #
+            device['lastRequest'] = 'VERIFY'
+
+            # --------------------------------------------------- #
+            # Send 100 Trying response to CPE capture app script. #
+            # --------------------------------------------------- #
+            this_response = '100 Trying {}'.format(target_device)
+            response_type = '100 Trying'
+            event = 'Sending [100 Trying] response for verifying connectivity to device: [{}]'.format(target_device)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+            if send_response(logger, log_id, server_socket, this_response, sendto_address):
+                event = 'Sent response for verifying connectivity to CPE device.'
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+
+                # ----------------------------------------------- #
+                # Save this response in 'devices_info' dictionary #
+                # ----------------------------------------------- #
+                device['lastResponse'] = response_type
+
+            else:
+                event = 'Failed to send response for verifying connectivity to CPE device!'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+                device['lastResponse'] = ''
+
+            # ------------------------------- #
+            # Send traffic to this CPE device #
+            # ------------------------------- #
+            send_traffic(logger, log_id, target_device, devices_info)
+
+            if device['status'].lower() == 'success':
+                # ----------------------------------------------- #
+                # Send 200 OK response to CPE capture app script. #
+                # ----------------------------------------------- #
+                this_response = '200 OK {}'.format(target_device)
+                response_type = '200 OK'
+            else:
+                this_response = '430 Flow Failed {}'.format(target_device)
+                response_type = '430 Flow Failed'
+
+            event = 'Sending response for verifying connectivity to CPE device: [{}]'.format(this_response)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+            if send_response(logger, log_id, server_socket, this_response, sendto_address):
+                event = 'Sent response for verifying connectivity to CPE device.'
+                logger.info('{} - {}'.format(log_id, event))
+                print('    - INFO: {}'.format(event))
+
+                # ----------------------------------------------- #
+                # Save this response in 'devices_info' dictionary #
+                # ----------------------------------------------- #
+                device['lastResponse'] = response_type
+
+            else:
+                event = 'Failed to send response for verifying connectivity to CPE device!'
+                logger.error('{} - {}'.format(log_id, event))
+                print('    - ERROR: {}'.format(event))
+                device['lastResponse'] = ''
+
+    # --------------------------------------------------------- #
+    # Received a VERIFY request for a device not yet registered #
+    # --------------------------------------------------------- #
+    if not device_found:
+
+        this_response = '404 Not Found {}'.format(target_device)
+        response_type = '404 Not Found'
+        event = 'Sending response for verifying connectivity to CPE device: [{}]'.format(this_response)
+        logger.info('{} - {}'.format(log_id, event))
+        print('  + {}'.format(event))
+        if send_response(logger, log_id, server_socket, this_response, sendto_address):
+            event = 'Sent response for verifying connectivity to CPE device.'
+            logger.info('{} - {}'.format(log_id, event))
+            print('    - INFO: {}'.format(event))
+
+            # ----------------------------------------------- #
+            # Save this response in 'devices_info' dictionary #
+            # ----------------------------------------------- #
+            device['lastResponse'] = response_type
+
+        else:
+            event = 'Failed to send response for verifying connectivity to CPE device!'
+            logger.error('{} - {}'.format(log_id, event))
+            print('    - ERROR: {}'.format(event))
+            device['lastResponse'] = ''
+
+    return
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: start_capture                                                     #
 #                                                                             #
 # Start network traffic capture on a specifc CPE device. The capture is       #
@@ -2449,6 +2966,8 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -2816,6 +3335,8 @@ def stop_capture(logger, log_id, target_device, filename, devices_info):
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -3036,6 +3557,8 @@ def abort_capture(logger, log_id, target_device, devices_info):
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -3071,41 +3594,6 @@ def parse_message(logger, log_id, message):
     # Match OVOC alarms in syslog format #
     # ---------------------------------- #
     if re.search('New Alarm -', message):
-
-        # ------------ #
-        # Set defaults #
-        # ------------ #
-        #msg_info['type'] = 'alarm'
-        #msg_info['timestamp'] = ''
-        #msg_info['alarmType'] = ''
-        #msg_info['alarmMessage'] = ''
-        #msg_info['alarmSource'] = ''
-        #msg_info['alarm'] = ''
-        #msg_info['deviceName'] = ''
-        #msg_info['tenant'] = ''
-        #msg_info['region'] = ''
-        #msg_info['ipAddress'] = ''
-        #msg_info['deviceType'] = ''
-        #msg_info['deviceSerial'] = ''
-        #msg_info['deviceDescription'] = ''
-
-        #event = 'Matched OVOC alarm'
-        #logger.debug('{} - {}'.format(log_id, event))
-
-        #match = re.search('<\d+>(.*?)\s*:\s*New Alarm\s*-\s*(.*?),\s*(.*)\s*Source:(.*?),\s*Description:(.*?),\s*Device Name:(.*?),\s*Tenant:(.*?),\s*Region:(.*?),\s*IP Address:(.*?),\s*Device Type:(.*?),\s*Device Serial:(.*?),\s*Device Description:(.*$)', message)
-        #if match:
-        #    msg_info['timestamp'] = match.group(1).strip()
-        #    msg_info['alarmType'] = match.group(2).strip()
-        #    msg_info['alarmMessage'] = match.group(3).strip()
-        #    msg_info['alarmSource'] = match.group(4).strip()
-        #    msg_info['alarm'] = match.group(5).strip()
-        #    msg_info['deviceName'] = match.group(6).strip()
-        #    msg_info['tenant'] = match.group(7).strip()
-        #    msg_info['region'] = match.group(8).strip()
-        #    msg_info['ipAddress'] = match.group(9).strip()
-        #    msg_info['deviceType'] = match.group(10).strip()
-        #    msg_info['deviceSerial'] = match.group(11).strip()
-        #    msg_info['deviceDescription'] = match.group(12).strip()
 
         # ------------ #
         # Set defaults #
@@ -3604,11 +4092,6 @@ def main(argv):
                 logger.info('{} - {}'.format(log_id, event))
                 print('{}'.format(event))
 
-                # ------------------------------------------------- #
-                # Get index for device in 'devices_info' dictionary #
-                # ------------------------------------------------- #
-                #device_index = get_device_index(logger, log_id, target_device, devices_info)
-
                 # ------------------------------------------------------- #
                 # If a 'REGISTER' request has been received, then add the #
                 # device to the 'devices_info' dictionary and then create #
@@ -3626,6 +4109,15 @@ def main(argv):
                 elif msg_info['request'] == 'CAPTURE':
 
                     process_capture(logger, log_id, server_socket, from_address, target_device, interface_name, devices_info)
+
+                # --------------------------------------------------- #
+                # If a 'VERIFY' request has been received, then start #
+                # generating ICMP, SNMP, and TCP traffic for this     #
+                # specific device.                                    #
+                # --------------------------------------------------- #
+                elif msg_info['request'] == 'VERIFY':
+
+                    process_verify(logger, log_id, server_socket, from_address, target_device, devices_info)
 
                 # ------------------------------------------------ #
                 # If a 'STOP' request has been received, then stop #
