@@ -118,16 +118,17 @@ The following is an example of what is tracked:
                       "ruleId": <some value>
                   },
               ],
+              "registration": "active|not active",
+              "regTime": seconds since epoch,
+              "ovocCapture": "not active",
               "cpeFilename": "<filename of stored CPE capture file on CPE script>
               "tempCapture": "<local tcpdump filename before renamed to match CPE filename>",
               "pid": "<some PID of tcpdump process>",
               "ovocCapture0": "<filename 1 from OVOC tcpdump capture that matches CPE filename>",
               "ovocCapture1": "<filename 2 from OVOC tcpdump capture that matches CPE filename>",
               "ovocCapture2": "<filename 3 from OVOC tcpdump capture that matches CPE filename>",
-              "registration": "active|not active",
-              "ovocCapture": "not active",
-              "lastRequest": "REGISTER|CAPTURE|STOP",
-              "lastResponse": "200 OK",
+              "lastRequest": "REGISTER|CAPTURE|VERIFY|STOP",
+              "lastResponse": "100 Trying|200 OK|404 Not Found|503 Service Unavailable",
           },
 
           <NEXT DEVICE>
@@ -148,6 +149,7 @@ import logging
 import json
 import time
 import socket
+import subprocess
 import gzip
 import shutil
 #import pathlib
@@ -475,146 +477,6 @@ def send_rest(method, url, username, password, data=None, data_type='json'):
 
     else:
         return response
-
-# --------------------------------------------------------------------------- #
-# FUNCTION: send_cli_script                                                   #
-#                                                                             #
-# Submit a REST API request to a device to execute the desired CLI script.    #
-#                                                                             #
-# Parameters:                                                                 #
-#     logger   - File handler for storing logged actions                      #
-#     log_id   - Unique identifier for this devices log entries               #
-#     script   - CLI script to execute on device in TEXT format               #
-#     device   - Address of CPE device to run script on                       #
-#     username - Username for account on CPE device                           #
-#     password - Password for account on CPE device                           #
-#                                                                             #
-# Return:                                                                     #
-#    task_info - Dictionary containing the following items:                   #
-#        status      - String: 'Success' or 'Fail'                            #
-#        statusCode  - Integer: REST response status code. (Ex: 200)          #
-#        output      - Detailed information of execution of CLI script        #
-#        description - String: Description of the task action                 #
-# --------------------------------------------------------------------------- #
-def send_cli_script(logger, log_id, script, device, username, password):
-    """Submit REST API PUT request to execute CLI script on device."""
-
-    # ------------------------------------------- #
-    # Create a dictionary to hold the relevant    #
-    # information to return for the current task. #
-    # ------------------------------------------- #
-    task_info = {}
-    task_info['status'] = 'Failure'
-    task_info['statusCode'] = -1
-    task_info['output'] = ''
-    task_info['description'] = ''
-
-    # -------------------------------------------------------- #
-    # The body of the REST API request is made up of the plain #
-    # text file part.                                          #
-    # -------------------------------------------------------- #
-    file_contents = {'file': ('cli.txt', script)}
-    event = 'REST API CLI Script:\n{}'.format(json.dumps(file_contents, indent=4))
-    logger.info('{} - {}'.format(log_id, event))
-
-    # ---------------- #
-    # Set REST API URL #
-    # ---------------- #
-    url = "https://" + device + "/api/v1/files/cliScript/incremental"
-
-    event = 'Method [PUT] - Request URL: {}'.format(url)
-    logger.info('{} - {}'.format(log_id, event))
-
-    # -------------------------------- #
-    # Send REST request to OVOC server #
-    # -------------------------------- #
-    rest_response = send_rest('PUT', url, username, password, file_contents, 'files')
-    rest_response_data = ''
-    if type(rest_response) is str:
-        rest_response_data = rest_response
-        event = 'REST Request Error: {}'.format(rest_response_data)
-        logger.error('{} - {}'.format(log_id, event))
-
-        # ------------- #
-        # Set task info #
-        # ------------- #
-        task_info['description'] = event
-
-        event = 'REST request failed. Could not send CLI script to device.'
-        logger.error('{} - {}'.format(log_id, event))
-    else:
-        if 'Content-Type' in rest_response.headers:
-            if re.search('application/json', rest_response.headers['Content-Type']):
-                rest_response_data = {}
-                if len(rest_response.text) > 0:
-                    rest_response_data = json.loads(rest_response.text)
-                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
-                logger.info('{} - {}'.format(log_id, event))
-            else:
-                rest_response_data = rest_response.text
-                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
-                logger.info('{} - {}'.format(log_id, event))
-        else:
-            rest_response_data = rest_response.text
-            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
-            logger.info('{} - {}'.format(log_id, event))
-
-        if rest_response.status_code == 200:
-            # --------------------------------------- #
-            # Status Code 200 - CLI script was loaded #
-            # --------------------------------------- #
-            if 'status' in rest_response_data:
-                if rest_response_data['status'].lower() == 'success':
-
-                    # ------------------------------------------ #
-                    # Successfully executed CLI script on device #
-                    # ------------------------------------------ #
-                    event = 'Successfully executed CLI script on device.'
-                    logger.info('{} - {}'.format(log_id, event))
-
-                else:
-
-                    # ------------------------------------- #
-                    # CLI script execution failed on device #
-                    # ------------------------------------- #
-                    event = 'CLI script execution failed on device.'
-                    logger.error('{} - {}'.format(log_id, event))
-
-                # ------------- #
-                # Set task info #
-                # ------------- #
-                task_info['status'] = rest_response_data['status'].capitalize()
-                task_info['statusCode'] = rest_response.status_code
-                task_info['output'] = rest_response_data['output']
-                task_info['description'] = event
-
-            else:
-                event = 'Response status was 200, but unable to extract CLI execution status!'
-                logger.warning('{} - {}'.format(log_id, event))
-
-                # ------------- #
-                # Set task info #
-                # ------------- #
-                task_info['description'] = event
-
-        else:
-            # ---------------------------------------------- #
-            # REST request to this device was not successful #
-            # ---------------------------------------------- #
-            if 'description' in rest_response_data:
-                event = '{}'.format(rest_response_data['description'])
-                logger.error('{} - {}'.format(log_id, event))
-            else:
-                event = 'Unexpected response received from device. Status code: [{}]'.format(rest_response.status_code)
-                logger.error('{} - {}'.format(log_id, event))
-
-            # ------------- #
-            # Set task info #
-            # ------------- #
-            task_info['status_code'] = rest_response.status_code
-            task_info['description'] = event
-
-    return task_info
 
 # --------------------------------------------------------------------------- #
 # FUNCTION: get_address_type                                                  #
@@ -1056,6 +918,112 @@ def update_fwd_rule(logger, log_id, rule_id, device_id, address, port, alarm_lis
     return task_info
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: delete_fwd_rule                                                   #
+#                                                                             #
+# Submit a REST API request to delete the settings of a SNMP alarm forwarding #
+# rule that has been defined on this OVOC server.                             #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger      - File handler for storing logged actions                   #
+#     log_id      - Unique identifier for this devices log entries            #
+#     rule_id     - ID of SNMP alarm forwarding rule on this OVOC server      #
+#     credentials - Credentials for REST API account on OVOC server           #
+#                                                                             #
+# Return:                                                                     #
+#    task_info - Dictionary containing the following items:                   #
+#        status      - String: 'Success' or 'Fail'                            #
+#        statusCode  - Integer: REST response status code. (Ex: 200)          #
+#        description - String: Description of the task action                 #
+# --------------------------------------------------------------------------- #
+def delete_fwd_rule(logger, log_id, rule_id, credentials):
+    """Delete settings of a SNMP alarm forwarding rule defined on OVOC server."""
+
+    # ------------------------------------------- #
+    # Create a dictionary to hold the relevant    #
+    # information to return for the current task. #
+    # ------------------------------------------- #
+    task_info = {}
+    task_info['task'] = 'Delete Alarm Forwarding Rule'
+    task_info['status'] = 'Fail'
+    task_info['statusCode'] = -1
+    task_info['description'] = ''
+
+    # ---------------- #
+    # Set REST API URL #
+    # ---------------- #
+    url = "https://127.0.0.1/ovoc/v1/alarms/fwdRules/" + str(rule_id)
+
+    event = 'Method [DELETE] - Request URL: {}'.format(url)
+    logger.info('{} - {}'.format(log_id, event))
+
+    # -------------------------------- #
+    # Send REST request to OVOC server #
+    # -------------------------------- #
+    rest_response = send_rest('DELETE', url, credentials['username'], credentials['password'])
+    rest_response_data = ''
+    if type(rest_response) is str:
+        rest_response_data = rest_response
+        event = 'REST Request Error: {}'.format(rest_response_data)
+        logger.error('{} - {}'.format(log_id, event))
+
+        # ------------- #
+        # Set task info #
+        # ------------- #
+        task_info['description'] = event
+
+        event = 'REST request failed. Could not delete SNMP alarm forwarding rule on OVOC server.'
+        logger.warning('{} - {}'.format(log_id, event))
+    else:
+        if 'Content-Type' in rest_response.headers:
+            if re.search('application/json', rest_response.headers['Content-Type']):
+                rest_response_data = {}
+                if len(rest_response.text) > 0:
+                    rest_response_data = json.loads(rest_response.text)
+                event = 'REST Response application/json Content-Type:\n{}'.format(json.dumps(rest_response_data, indent=4))
+                logger.info('{} - {}'.format(log_id, event))
+            else:
+                rest_response_data = rest_response.text
+                event = 'REST Response non-application/json Content-Type:\n{}'.format(rest_response_data)
+                logger.info('{} - {}'.format(log_id, event))
+        else:
+            rest_response_data = rest_response.text
+            event = 'REST Response no Content-Type:\n{}'.format(rest_response_data)
+            logger.info('{} - {}'.format(log_id, event))
+
+        if rest_response.status_code == 200:
+            # --------------------------------------------------------------------- #
+            # Status Code 200 - Successfully deleted forwarding rule on OVOC server #
+            # --------------------------------------------------------------------- #
+            event = 'Successfully deleted SNMP alarm forwarding rule on OVOC server'
+            logger.info('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['status'] = 'Success'
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+        else:
+            # --------------------------------------------- #
+            # Deletion of rule on server was not successful #
+            # --------------------------------------------- #
+            if 'description' in rest_response_data:
+                event = '{}'.format(rest_response_data['description'])
+                logger.warning('{} - {}'.format(log_id, event))
+            else:
+                event = 'Failed to delete SNMP alarm forwarding rule on OVOC server'
+                logger.warning('{} - {}'.format(log_id, event))
+
+            # ------------- #
+            # Set task info #
+            # ------------- #
+            task_info['statusCode'] = rest_response.status_code
+            task_info['description'] = event
+
+    return task_info
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: create_fwd_rule                                                   #
 #                                                                             #
 # Submit a REST API request to create a new SNMP alarm forwarding rule on     #
@@ -1462,6 +1430,157 @@ def set_alarm_fwd_rule(logger, log_id, target_device, rule_name, alarm_list, sen
     return rule_ready
 
 # --------------------------------------------------------------------------- #
+# FUNCTION: delete_alarm_fwd_rule                                             #
+#                                                                             #
+# Delete the targeted SNMP alarm forwarding rule from an OVOC server.         #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger         - File handler for storing logged actions                #
+#     log_id         - Unique identifier for this devices log entries         #
+#     target_device  - CPE device to create an alarm forwarded rule for       #
+#                       ("" for all devices)                                  #
+#     rule_name      - Unique and descriptive name for this forwarding rule   #
+#     credentials    - Credentials for REST API account on OVOC server        #
+#     devices_info   - Dictionary of targeted devices                         #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+#    rule_removed - Boolean: 'True' if setup successful, 'False' is not.      #
+# --------------------------------------------------------------------------- #
+def delete_alarm_fwd_rule(logger, log_id, target_device, rule_name, credentials, devices_info):
+    """Set SNMP alarm forwarding rule on OVOC server."""
+
+    rule_removed = False
+
+    # ------------------------------------------ #
+    # If setting up a global forwarding rule not #
+    # associated with any targeted devices.      #
+    # ------------------------------------------ #
+    if target_device == '':
+
+        device_id = -1
+        get_fwd_rule_task = get_fwd_rule_id(logger, log_id, rule_name, credentials)
+
+        # -------------------- #
+        # Delete rule if found #
+        # -------------------- #
+        if get_fwd_rule_task['ruleId'] != -1:
+            event = 'Deleting global SNMP alarm forwarding rule: [{}]'.format(rule_name)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+            delete_fwd_rule_task = delete_fwd_rule(logger, log_id, get_fwd_rule_task['ruleId'], credentials)
+
+            event = delete_fwd_rule_task['description']
+            if delete_fwd_rule_task['status'].lower() == 'success':
+                print('  + INFO: {}'.format(event))
+                rule_removed = True
+            else:
+                print('  + WARNING: {}'.format(event))
+
+    # ---------------------------------------- #
+    # If deleting a device specific forwarding #
+    # rule associated with a targeted devices. #
+    # ---------------------------------------- #
+    else:
+        device_found = False
+        device_index = 0
+        for device in devices_info['devices']:
+            if device['device'] == target_device:
+
+                device_found = True
+                event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+                logger.debug('{} - {}'.format(log_id, event))
+
+                # ------------------------------------------------------- #
+                # Track information to summarize each devices info record #
+                # ------------------------------------------------------- #
+                device_status = ''
+                device_severity = ''
+                last_description = ''
+
+                event = 'Checking if device has existing SNMP alarm forwarding rule.'
+                logger.info('{} - {}'.format(log_id, event))
+                print('  + {}'.format(event))
+
+                # --------------------------------------------------- #
+                # Check for device SNMP alarm forwarding rule on OVOC #
+                # and store task information.                         #
+                # --------------------------------------------------- #
+                get_fwd_rule_task = get_fwd_rule_id(logger, log_id, rule_name, credentials)
+                task_timestamp = datetime.now()
+                get_fwd_rule_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                device['tasks'].append(get_fwd_rule_task.copy())
+                device_status = get_fwd_rule_task['status']
+                logger.debug('{} - {}'.format(log_id, device_status))
+                last_description = get_fwd_rule_task['description']
+
+                # --------------- #
+                # Display results #
+                # --------------- #
+                event = get_fwd_rule_task['description']
+                if device_status.lower() == 'success':
+                    print('    - INFO: {}'.format(event))
+                else:
+                    print('    - INFO: {}'.format(event))
+
+                # -------------------- #
+                # Delete rule if found #
+                # -------------------- #
+                if get_fwd_rule_task['ruleId'] != -1:
+
+                    event = 'Deleting SNMP alarm forwarding rule [{}] for device: [{}]'.format(rule_name, target_device)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('  + {}'.format(event))
+
+                    delete_fwd_rule_task = delete_fwd_rule(logger, log_id, get_fwd_rule_task['ruleId'], credentials)
+
+                    # ---------------------- #
+                    # Store task information #
+                    # ---------------------- #
+                    task_timestamp = datetime.now()
+                    delete_fwd_rule_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+                    device['tasks'].append(delete_fwd_rule_task.copy())
+                    device_status = delete_fwd_rule_task['status']
+                    logger.debug('{} - {}'.format(log_id, device_status))
+                    last_description = delete_fwd_rule_task['description']
+
+                    # --------------- #
+                    # Display results #
+                    # --------------- #
+                    event = delete_fwd_rule_task['description']
+                    if delete_fwd_rule_task['status'].lower() == 'success':
+                        print('    - INFO: {}'.format(event))
+                        rule_removed = True
+                    else:
+                        print('    - WARNING: {}'.format(event))
+
+                # -------------------------------------- #
+                # Store task information at device level #
+                # -------------------------------------- #
+                device['status'] = device_status
+                device['description'] = last_description
+
+                if rule_removed:
+                    device['severity'] = 'NORMAL'
+                else:
+                    device['severity'] = 'MINOR'
+
+                break
+
+            device_index += 1
+
+        if not device_found:
+            device['status'] = 'Failure'
+            device['severity'] = 'MINOR'
+            event = 'Device not found in monitored devices list!'
+            logger.error('{} - {}'.format(log_id, event))
+            print('  + ERROR: {}'.format(event))
+
+    return rule_removed
+
+# --------------------------------------------------------------------------- #
 # FUNCTION: send_response                                                     #
 #                                                                             #
 # Send a response to a CPE capture app script.                                #
@@ -1563,6 +1682,11 @@ def secure_json_dump(logger, log_id, devices_info, mask_list):
 def send_traffic(logger, log_id, target_device, devices_info):
     """Generate ICMP, SNMP, and TCP traffic to send to the target CPE device."""
 
+    # ------------------------------ #
+    # Attempts for each traffic type #
+    # ------------------------------ #
+    attempts = 10
+
     device_found = False
     device_index = 0
     for device in devices_info['devices']:
@@ -1599,7 +1723,6 @@ def send_traffic(logger, log_id, target_device, devices_info):
             send_icmp_task = {}
             send_icmp_task['task'] = 'Send ICMP (Ping)'
             send_icmp_task['status'] = 'Failure'
-            send_icmp_task['statusCode'] = -1
             send_icmp_task['output'] = ''
             send_icmp_task['description'] = ''
             task_timestamp = datetime.now()
@@ -1608,13 +1731,20 @@ def send_traffic(logger, log_id, target_device, devices_info):
             # ------------------------------------ #
             # Send ICMP pings to the target device #
             # ------------------------------------ #
-            event = 'Sending 10 ICMP pings to target CPE device...'
+            event = 'Sending {} ICMP pings to target CPE device...'.format(attempts)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
 
-            command = 'ping -c 10 {}'.format(target_device)
-            icmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
-            processes.append(icmp_process)
+            attempt = 1
+            while attempt <= attempts:
+
+                command = 'sleep ' + str(attempt) + '; ping -c 1 ' + target_device
+                event = 'Command: ' + command
+                logger.debug('{} - {}'.format(log_id, event))
+                icmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+                processes.append(icmp_process)
+
+                attempt += 1
 
             # ------------------------------------------- #
             # Create a dictionary to hold the relevant    #
@@ -1623,7 +1753,6 @@ def send_traffic(logger, log_id, target_device, devices_info):
             send_snmp_task = {}
             send_snmp_task['task'] = 'Send UDP (SNMP v3)'
             send_snmp_task['status'] = 'Failure'
-            send_snmp_task['statusCode'] = -1
             send_snmp_task['output'] = ''
             send_snmp_task['description'] = ''
             task_timestamp = datetime.now()
@@ -1633,22 +1762,28 @@ def send_traffic(logger, log_id, target_device, devices_info):
             # Send SNMP v3 request to get system  #
             # description from the target device. #
             # ----------------------------------- #
-            event = 'Sending 5 SNMP v3 GET requests for sysDescr.0 to target CPE device...'
+            event = 'Sending {} SNMP v3 GET requests for sysDescr.0 to target CPE device...'.format(attempts)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
 
-            command = 'for i in {1..5}; do snmpget -v 3 -n "" -u CaptureScript -a SHA -l authPriv -A Capture01! -X Capture01! -x AES {} sysDescr.0; sleep 1; done'.format(target_device)
-            snmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
-            processes.append(snmp_process)
+            attempt = 1
+            while attempt <= attempts:
+
+                command = 'sleep ' + str(attempt) + '; snmpget -v 3 -r 0 -n "" -u CaptureScript -a SHA -l authPriv -A Capture01! -X Capture01! -x AES ' + target_device + ' sysDescr.0'
+                event = 'Command: ' + command
+                logger.debug('{} - {}'.format(log_id, event))
+                snmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+                processes.append(snmp_process)
+
+                attempt += 1
 
             # ------------------------------------------- #
             # Create a dictionary to hold the relevant    #
             # information to return for the current task. #
             # ------------------------------------------- #
             send_tcp_task = {}
-            send_tcp_task['task'] = 'Send TCP (SSH)'
+            send_tcp_task['task'] = 'Send TCP (Port 443)'
             send_tcp_task['status'] = 'Failure'
-            send_tcp_task['statusCode'] = -1
             send_tcp_task['output'] = ''
             send_tcp_task['description'] = ''
             task_timestamp = datetime.now()
@@ -1656,34 +1791,43 @@ def send_traffic(logger, log_id, target_device, devices_info):
 
             # ------------------------------------ #
             # Send TCP connection attempts to port #
-            # 22 on target device.                 #
+            # 443 on target device.                #
             # ------------------------------------ #
-            event = 'Sending 2 TCP connection requests to port 22 on target CPE device...'.format(max_retries)
+            event = 'Sending {} TCP connection requests to port 443 on target CPE device...'.format(attempts)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
 
+            tcp_failures = 0
             attempt = 1
-            while attempt <= 2:
+            while attempt <= attempts:
 
-                # ---------------------------------------------- #
-                # Attempt to connect to port 22 on target device #
-                # ---------------------------------------------- #
-                event = 'Attempting to connect to port 22 on CPE device...'
+                # ----------------------------------------------- #
+                # Attempt to connect to port 443 on target device #
+                # ----------------------------------------------- #
+                event = 'Attempting to connect to port 443 on CPE device...'
                 logger.info('{} - {}'.format(log_id, event))
-                print('  + {}'.format(event))
+                #print('  + {}'.format(event))
 
                 try:
-                    socket.setdefaulttimeout(2)
+                    socket.setdefaulttimeout(1)
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.connect((target_device, 22))
+                    s.connect((target_device, 443))
                 except Exception as error:
-                    event = 'Error: ' + str(error)
-                    logger.error('{} - {}'.format(log_id, event))
-                    send_tcp_task['description'] = error
+                    tcp_failures += 1
+                    if type(error) is list:
+                        if len(error) > 1:
+                            error = str(error[1])
+                        else:
+                            error = str(error[0])
+                    error = str(error)
+                    error = re.sub('\[|\]', '', error)
+                    event = 'TCP attempt {} failed: {}.'.format(attempt, error)
+                    logger.warning('{} - {}'.format(log_id, event))
+                    send_tcp_task['output'] += error + ' '
                 else:
-                    event = 'TCP connection established'
+                    event = 'TCP attempt {} SYN ACK received.'.format(attempt)
                     logger.info('{} - {}'.format(log_id, event))
-                    send_tcp_task['description'] = error
+                    send_tcp_task['output'] += event + ' '
                     s.close()
 
                 attempt += 1
@@ -1694,67 +1838,95 @@ def send_traffic(logger, log_id, target_device, devices_info):
             # executed with no errors.                                 #
             # -------------------------------------------------------- #
             results = [p.wait() for p in processes]
+            event = 'Results list: {}'.format(results)
+            logger.debug('{} - {}'.format(log_id, event))
 
-            # ---------------------------------------------------- #
-            # Result [0] is associated with the first ICMP process #
-            # ---------------------------------------------------- #
-            if results[0] == 0:
-                send_icmp_task['status'] = 'Success'
-                send_icmp_task['statusCode'] = 0
-                send_icmp_task['description'] = 'Sent ICMP pings to device.'
-            else:
-                send_icmp_task['statusCode'] = results[0]
-                send_icmp_task['description'] = 'Failed to send ICMP pings to device!'
-
-            # ----------------------------------------------------- #
-            # Result [1] is associated with the second SNMP process #
-            # ----------------------------------------------------- #
-            if results[1] == 0:
-                send_snmp_task['status'] = 'Success'
-                send_snmp_task['statusCode'] = 0
-                send_snmp_task['description'] = 'Sent SNMP v3 requests to device.'
-            else:
-                send_snmp_task['statusCode'] = results[0]
-                send_snmp_task['description'] = 'Failed to send SNMP v3 requests to device!'
-
-            # --------------- #
-            # Display results #
-            # --------------- #
             device_status = 'Success'
-            sent_icmp = True
-            event = send_icmp_task['description']
-            if send_icmp_task['status'].lower() == 'success':
+
+            # ---------------------------------------- #
+            # Results 0 to (attempts-1) are associated #
+            # with the ICMP pings attempts.            #
+            # ---------------------------------------- #
+            icmp_failures = 0
+            attempt = 1
+            for index in range(0, attempts):
+                if len(results) - 1 >= index:
+                    if results[index] != 0:
+                        icmp_failures += 1
+                        event = 'ICMP attempt {} failed.'.format(attempt)
+                        logger.warning('{} - {}'.format(log_id, event))
+                    else:
+                        event = 'ICMP attempt {} received response.'.format(attempt)
+                        logger.info('{} - {}'.format(log_id, event))
+                    send_icmp_task['output'] += event + ' '
+                else:
+                    event = 'Result not found for ICMP request {}'.format(attempt)
+                    logger.error('{} - {}'.format(log_id, event))
+
+                attempt += 1
+
+            if icmp_failures == 0:
+                event = 'Successfully sent all ICMP pings to device.'
                 logger.info('{} - {}'.format(log_id, event))
+                send_icmp_task['status'] = 'Success'
                 print('    - INFO: {}'.format(event))
             else:
-                sent_icmp = False
                 device_status = 'Failure'
-                logger.error('{} - {}'.format(log_id, event))
-                print('    - ERROR: {}'.format(event))
+                event = 'Failed to receive response to {} out of 10 ICMP pings!'.format(icmp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_icmp_task['description'] = event
             device['tasks'].append(send_icmp_task.copy())
 
-            sent_snmp = True
-            event = send_snmp_task['description']
-            if send_snmp_task['status'].lower() == 'success':
+            # ----------------------------------------- #
+            # Results (attempts) to (attempts*2) are    #
+            # associated with the 10 SNMP GET attempts. #
+            # ----------------------------------------- #
+            snmp_failures = 0
+            attempt = 1
+            for index in range(attempts, attempts*2):
+                if len(results) - 1 >= index:
+                    if results[index] != 0:
+                        snmp_failures += 1
+                        event = 'SNMP attempt {} failed'.format(attempt)
+                        logger.warning('{} - {}'.format(log_id, event))
+                    else:
+                        event = 'SNMP attempt {} received response.'.format(attempt)
+                        logger.info('{} - {}'.format(log_id, event))
+                    send_snmp_task['output'] += event + ' '
+                else:
+                    event = 'Result not found for SNMP request {}'.format(attempt)
+                    logger.error('{} - {}'.format(log_id, event))
+
+                attempt += 1
+
+            if snmp_failures == 0:
+                event = 'Successfully sent all SNMP GET requests to device.'
                 logger.info('{} - {}'.format(log_id, event))
+                send_snmp_task['status'] = 'Success'
                 print('    - INFO: {}'.format(event))
             else:
-                sent_snmp = False
                 device_status = 'Failure'
-                logger.error('{} - {}'.format(log_id, event))
-                print('    - ERROR: {}'.format(event))
+                event = 'Failed to receive response to {} out of 10 SNMP GET requests!'.format(snmp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_snmp_task['description'] = event
             device['tasks'].append(send_snmp_task.copy())
 
-            sent_tcp = True
-            event = send_tcp_task['description']
-            if send_tcp_task['status'].lower() == 'success':
+            # ----------------------------------- #
+            # Results for TCP connection attempts #
+            # ----------------------------------- #
+            if tcp_failures == 0:
+                event = 'Successfully sent all TCP connection requests to device.'
                 logger.info('{} - {}'.format(log_id, event))
+                send_tcp_task['status'] = 'Success'
                 print('    - INFO: {}'.format(event))
             else:
-                sent_tcp = False
                 device_status = 'Failure'
-                logger.error('{} - {}'.format(log_id, event))
-                print('    - ERROR: {}'.format(event))
+                event = 'Failed to receive response to {} out of 10 TCP connection requests!'.format(tcp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_tcp_task['description'] = event
             device['tasks'].append(send_tcp_task.copy())
 
             # -------------------------------------- #
@@ -1763,7 +1935,7 @@ def send_traffic(logger, log_id, target_device, devices_info):
             device['status'] = device_status
             device['description'] = send_icmp_task['description'] + ' ' + send_snmp_task['description'] + ' ' + send_tcp_task['description']
 
-            if sent_icmp and sent_snmp and sent_tcp:
+            if icmp_failures == 0 and snmp_failures == 0 and tcp_failures == 0:
                 device['severity'] = 'NORMAL'
             else:
                 device['severity'] = 'CRITICAL'
@@ -2529,6 +2701,7 @@ def process_register(logger, log_id, server_socket, sendto_address, target_devic
                 this_response = '200 OK {}'.format(target_device)
                 response_type = '200 OK'
                 device['registration'] = 'active'
+                device['regTime'] = time.time()
                 event = 'Registered device and setup SNMP configuration and alarm forwarding rule.'
                 logger.info('{} - {}'.format(log_id, event))
                 print('    - INFO: {}'.format(event))
@@ -3660,6 +3833,23 @@ def parse_message(logger, log_id, message):
             msg_info['request'] = match.group(1).strip()
             msg_info['device'] = match.group(2).strip()
 
+    elif re.search('^VERIFY', message):
+
+        event = 'Matched CPE capture script [VERIFY] request'
+        logger.debug('{} - {}'.format(log_id, event))
+
+        # ------------ #
+        # Set defaults #
+        # ------------ #
+        msg_info['type'] = 'request'
+        msg_info['request'] = ''
+        msg_info['device'] = ''
+
+        match = re.search('(VERIFY)\s+(.*$)', message)
+        if match:
+            msg_info['request'] = match.group(1).strip()
+            msg_info['device'] = match.group(2).strip()
+
     elif re.search('^STOP', message):
 
         # ------------ #
@@ -4140,6 +4330,7 @@ def main(argv):
             # ------------------------------------------------- #
             # Check for any CPE devices actively being captured #
             # ------------------------------------------------- #
+            now_time = int(time.time())
             if prevent_shutdown:
                 active_captures = 1
             else:
@@ -4148,10 +4339,21 @@ def main(argv):
                     if device['ovocCapture'].lower() == 'active':
                         active_captures += 1
 
+                    # ------------------------------------------- #
+                    # Cleanup any configuration for stale devices #
+                    # that have not been active for over 2 hours. #
+                    # ------------------------------------------- #
+                    if device['ovocCapture'].lower() == 'not active':
+                        if 'regTime' in device:
+                            if now_time - device['regTime'] > 7200:
+                                rule_name = 'Forward Connection Lost from {}'.format(device['device'])
+                                delete_alarm_fwd_rule(logger, log_id, device['device'], rule_name, ovoc_credentials, devices_info)
+
             # ------------------------------------------------ #
             # For debugging - Output 'devices_info' dictionary #
             # ------------------------------------------------ #
-            event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
+            #event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
+            event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
             logger.debug('{} - {}'.format(log_id, event))
 
             #event = 'Listening for script messaging on UDP port: [{}]'.format(listen_port)
