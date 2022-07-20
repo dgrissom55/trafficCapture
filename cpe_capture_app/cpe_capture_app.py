@@ -851,15 +851,15 @@ def get_cpe_devices(logger, log_id):
     config_cpe_devices = []
 
     print('')
-    print(':===============================================================================:')
-    print(': Create a set of CPE devices to target for network traffic captures. Enter the :')
-    print(': required information to use when connecting to each device.                   :')
-    print(':                                                                               :')
-    print(': NOTE: Previously entered CPE devices are recalled and can  be modified if     :')
-    print(':       desired.                                                                :')
-    print(':                                                                               :')
-    print(': NOTE: To remove a stored device, type "delete" for the CPE device address.    :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Create a set of CPE devices to target for network traffic captures. Enter   :')
+    print(': the required information to use when connecting to each device.             :')
+    print(':                                                                             :')
+    print(': NOTE: Previously entered CPE devices are recalled and can  be modified if   :')
+    print(':       desired.                                                              :')
+    print(':                                                                             :')
+    print(': NOTE: To remove a stored device, type "delete" for the CPE device address.  :')
+    print(':=============================================================================:')
     if len(config.cpe_devices) == 0:
         event = 'No stored CPE devices were found.'
         logger.info('{} - {}'.format(log_id, event))
@@ -1625,12 +1625,12 @@ def get_listen_port(logger, log_id):
     # Allow modification of stored UDP listen port #
     # -------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': UDP port to listen on for incoming alarms forwarded by an OVOC server. Alarms :')
-    print(': are expected to be in SYSLOG format.                                          :')
-    print(':                                                                               :')
-    print(': NOTE: Entered port should be in the range (1025 - 65535)                      :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': UDP port to listen on for incoming alarms forwarded by an OVOC server.      :')
+    print(': Alarms are expected to be in SYSLOG format.                                 :')
+    print(':                                                                             :')
+    print(': NOTE: Entered port should be in the range (1025 - 65535)                    :')
+    print(':=============================================================================:')
     got_listen_port = False
     while not got_listen_port:
 
@@ -1791,14 +1791,14 @@ def get_max_reg_attempts(logger, log_id):
     # Allow modification of stored REST API retry attempts #
     # ---------------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': Maximum number of registration attempts allowed when sending connection       :')
-    print(': requests to an OVOC capture app script. If the registration is unsuccessful,  :')
-    print(': then no capture will be performed for the device that failed to register for  :')
-    print(': this session of the CPE capture script.                                       :')
-    print(':                                                                               :')
-    print(': NOTE: Entered value should be in the range (1 - 25)                           :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Maximum number of registration attempts allowed when sending connection     :')
+    print(': requests to an associated OVOC capture app script. If the registration is   :')
+    print(': unsuccessful, then no capture will be performed for the device that failed  :')
+    print(': to register for this session of the CPE capture script.                     :')
+    print(':                                                                             :')
+    print(': NOTE: Entered value should be in the range (1 - 25)                         :')
+    print(':=============================================================================:')
     got_max_reg_attempts = False
     while not got_max_reg_attempts:
 
@@ -1959,12 +1959,12 @@ def get_max_retries(logger, log_id):
     # Allow modification of stored REST API retry attempts #
     # ---------------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': Maximum number of REST API retry attempts allowed when sending requests to    :')
-    print(': CPE devices.                                                                  :')
-    print(':                                                                               :')
-    print(': NOTE: Entered value should be in the range (1 - 100)                          :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Maximum number of REST API retry attempts allowed when sending requests to  :')
+    print(': CPE devices.                                                                :')
+    print(':                                                                             :')
+    print(': NOTE: Entered value should be in the range (1 - 100)                        :')
+    print(':=============================================================================:')
     got_max_retries = False
     while not got_max_retries:
 
@@ -2129,17 +2129,17 @@ def get_max_events_per_device(logger, log_id):
     # Allow modification of stored REST API retry attempts #
     # ---------------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': Maximum number of OVOC alarm events that can be received per device that      :')
-    print(': trigger the retrieval of the network capture from a CPE device.               :')
-    print(':                                                                               :')
-    print(': If the triggering events counter is less than the value, then the network     :')
-    print(': traffic capture is restarted on the CPE device.                               :')
-    print(':                                                                               :')
-    print(': NOTE: Currently triggering on "Connection Lost" alarm.                        :')
-    print(':                                                                               :')
-    print(': NOTE: Entered value should be in the range (1 - 50)                           :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Maximum number of OVOC alarm events that can be received per device that    :')
+    print(': trigger the retrieval of the network capture from a CPE device.             :')
+    print(':                                                                             :')
+    print(': If the triggering events counter is less than the value, then the network   :')
+    print(': traffic capture is restarted on the CPE device.                             :')
+    print(':                                                                             :')
+    print(': NOTE: Currently triggering on "Connection Lost" alarm.                      :')
+    print(':                                                                             :')
+    print(': NOTE: Entered value should be in the range (1 - 50)                         :')
+    print(':=============================================================================:')
     got_max_events_per_device = False
     while not got_max_events_per_device:
 
@@ -3554,9 +3554,9 @@ def main(argv):
     version = config.version
 
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print(' Version: {:10s}            CPE CAPTURE APP'.format(version))
-    print('=================================================================================')
+    print('===============================================================================')
 
     # ----------------------------- #
     # Prepare captures subdirectory #
@@ -3590,12 +3590,12 @@ def main(argv):
     begin_time = time.time()
     begin_timestamp = datetime.now()
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print('                         CPE NETWORK TRAFFIC CAPTURES')
     #print(' Version: {:10s}     CPE NETWORK TRAFFIC CAPTURES'.format(version))
-    print('=================================================================================')
+    print('===============================================================================')
     print('Start Time:'.format(begin_timestamp))
-    print('---------------------------------------------------------------------------------')
+    print('-------------------------------------------------------------------------------')
 
     # --------------------------------------------- #
     # Prepare UDP socket to listen for OVOC alarms  #
@@ -3929,9 +3929,9 @@ def main(argv):
     end_time = time.time()
     end_timestamp = datetime.now()
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print('                              PROCESSING SUMMARY')
-    print('=================================================================================')
+    print('===============================================================================')
     print('Completed:'.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
