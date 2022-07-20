@@ -2102,11 +2102,11 @@ def get_listen_port(logger, log_id):
     # Allow modification of stored UDP listen port #
     # -------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': UDP port to listen on for incoming CPE capture app requests.                  :')
-    print(':                                                                               :')
-    print(': NOTE: Entered port should be in the range (1025 - 65535)                      :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': UDP port to listen on for incoming CPE capture app requests.                :')
+    print(':                                                                             :')
+    print(': NOTE: Entered port should be in the range (1025 - 65535)                    :')
+    print(':=============================================================================:')
     got_listen_port = False
     while not got_listen_port:
 
@@ -2270,12 +2270,12 @@ def get_prevent_shutdown(logger, log_id):
     # Allow modification of stored prevent shutdown setting #
     # ----------------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': Setting to control whether or not shut down this script after all active      :')
-    print(': captures have completed. Setting this to "y" prevents the script from         :')
-    print(': shutting down and allows this script to run indefinitely waiting for CPE      :')
-    print(': capture requests.                                                             :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Setting to control whether or not shut down this script after all active    :')
+    print(': captures have completed. Setting this to "y" prevents the script from       :')
+    print(': shutting down and allows this script to run indefinitely waiting for CPE    :')
+    print(': capture requests.                                                           :')
+    print(':=============================================================================:')
     this_prevent_shutdown = ''
     while this_prevent_shutdown == '':
         this_prevent_shutdown = str(raw_input('Prevent script from shutting down: (y/n) [{}] '.format(stored_prevent_shutdown))).lower().strip()
@@ -2447,9 +2447,9 @@ def get_interface_name(logger, log_id):
     # Allow modification of stored interface name #
     # ------------------------------------------- #
     print('')
-    print(':===============================================================================:')
-    print(': Name of the network interface to use for CPE traffic captures.                :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': Name of the network interface to use for CPE traffic captures.              :')
+    print(':=============================================================================:')
     this_interface_name = ''
     while this_interface_name == '':
         this_interface_name = str(raw_input('Enter network interface name for capture: ({}) [{}] '.format('|'.join(interface_list), stored_interface_name))).strip()
@@ -2612,13 +2612,13 @@ def get_ovoc_account(logger, log_id):
     # Allow modification of stored OVOC username #
     # ------------------------------------------ #
     print('')
-    print(':===============================================================================:')
-    print(': OVOC account username and password that can be used for performing REST API   :')
-    print(': requests. This script will use REST API to create the SNMP alarm forwarding   :')
-    print(': needed for the CPE capture scripts.                                           :')
-    print(':                                                                               :')
-    print(': NOTE: The account used must have at least "Operator" security level.          :')
-    print(':===============================================================================:')
+    print(':=============================================================================:')
+    print(': OVOC account username and password that can be used for performing REST API :')
+    print(': requests. This script will use REST API to create the SNMP alarm forwarding :')
+    print(': needed for the CPE capture scripts.                                         :')
+    print(':                                                                             :')
+    print(': NOTE: The account used must have at least "Operator" security level.        :')
+    print(':=============================================================================:')
     this_ovoc_username = ''
     while this_ovoc_username == '':
         this_ovoc_username = str(raw_input('Enter OVOC account username: [{}] '.format(stored_ovoc_username))).strip()
@@ -4181,9 +4181,9 @@ def main(argv):
     version = config.version
 
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print(' Version: {:10s}            OVOC CAPTURE APP'.format(version))
-    print('=================================================================================')
+    print('===============================================================================')
 
     # ------------------------------------------- #
     # Check if rotation of log files is necessary #
@@ -4251,12 +4251,12 @@ def main(argv):
     begin_time = time.time()
     begin_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print('                         OVOC NETWORK TRAFFIC CAPTURES')
     #print(' Version: {:10s}     OVOC NETWORK TRAFFIC CAPTURES'.format(version))
-    print('=================================================================================')
+    print('===============================================================================')
     print('Start Time: {}'.format(begin_timestamp))
-    print('---------------------------------------------------------------------------------')
+    print('-------------------------------------------------------------------------------')
 
     # ------------------------------------------------- #
     # Prepare UDP socket to receive requests and send   #
@@ -4406,9 +4406,9 @@ def main(argv):
     #end_timestamp = datetime.now()
     end_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
     print('')
-    print('=================================================================================')
+    print('===============================================================================')
     print('                              PROCESSING SUMMARY')
-    print('=================================================================================')
+    print('===============================================================================')
     print('Completed: '.format(end_timestamp))
     print('Total Duration: {0:.3f} seconds'.format(end_time - begin_time))
     print('')
