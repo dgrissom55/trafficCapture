@@ -44,17 +44,49 @@ Commands are sent from this script to the 'ovoc_listen_port' defined for
 the complementatry Python script ('ovoc_capture_app.py') running on the
 appropriate OVOC servers.
 
+On the CPE devices, the network captures are performed by sending REST API
+request to the targeted CPE. The REST API request contains the necessary CLI
+script to start the debug capture on the selected interfaces. Also, an SNMP
+v3 user is created to enable this script and the OVOC capture script to send
+SNMP traffic to the device after OVOC has placed the device(s) in a 
+'Connection Lost' state. In addition to the SNMP traffic, ICMP pings and TCP 
+connection requests are sent. This is to force network traffic to the device
+that will be captured by the CPE debug capture and the OVOC tcpdumps.
+
 On the OVOC servers, the network captures are performed by issuing system
 calls to the 'tcpdump' app. To start a capture on the OVOC server, this script
-sends a 'CAPTURE' command to OVOC to inform it which CPE traffic should be
-captured. The OVOC responds with a 'TRYING' when setting up the tcpdump, and
-an 'OK' when the tcpdump process is running. The response will be 'FAIL' if
-the capture fails to be started on the OVOC server. The captures are stopped
-on the OVOC after this script receives the 'Connection Lost' SNMP alarm. This
-script will send a 'STOP' message to the OVOC server to trigger it to kill the
-tcpdump process for that CPE device.
+first registers the target devices by sending a 'REGISTER' message for each
+device. The OVOC capture script receives the devices registration and creates
+an SNMP forwarding alarm on the OVOC servers for each device in order to send
+'Connection Lost' events to this CPE capture script. The OVOC capture script
+sends a '200 OK' once the device setup is complete and the alarm forwarding
+rule is setup on the OVOC server. If the forwarding rule fails to be created
+or updated, the OVOC capture script sends a '503 Service Unavailable'
+response.
 
-The following messages are exchanged:
+After the registration the CPE capture script sends a 'CAPTURE' command to
+the OVOC capture script for each targeted device to inform it which CPE
+traffic should be captured. The OVOC capture script responds with a
+'100 TRYING' when setting up the tcpdump, and a '200 OK' when the tcpdump
+process is running. The response will be a '503 Service Unavailable'
+if the tcpdump fails to start on the server.
+
+To generate ICMP, SNMPv3, and TCP connections to the target device that
+OVOC triggered the `Connection Lost` alarm on, a 'VERIFY' message is sent
+from the CPE capture script to the OVOC capture script. The `VERIFY` message
+is sent to the OVOC capture script so that both the server that is running
+the CPE capture script and the OVOC server can create traffic to send to
+the targeted CPE device. The debug capture running on the device and the
+tcpdump running on the OVOC server should capture this generated traffic.
+If there truly is a network connectivity issue, this generated traffic
+should help isolate any issues.
+
+The captures are stopped on the OVOC server after this script receives the 
+'Connection Lost' SNMP alarm. This script will send a 'STOP' message to the
+OVOC capture script to trigger it to kill the tcpdump process for that CPE
+device.
+
+For a normal flow, the following messages are exchanged:
 
   CPE script                                 This script
        |                                           |
@@ -83,11 +115,12 @@ The following messages are exchanged:
        |<-------- 200 OK <device address> ---------|
        |                                           |
 
-If this script receives a request and the device address is not found in the
-devices information dictionary, then a '404 Not Found' is returned.
+If the OVOC capture script receives a request and the device address is not
+found in the devices information dictionary, then a '404 Not Found' is
+returned.
 
-If the capture fails to be started or fails to stop, then the response will
-be a '503 Service Unavailable'.
+If the OVOC capture fails to be started or fails to stop, then the response
+will be a '503 Service Unavailable'.
 
 This script tracks capture states, all tasks, and other information for each
 targeted CPE device. The 'devices_info' dictionary is created to track each
@@ -2368,11 +2401,11 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
-                # ----------------------------------------------- #
-                # Define SNMP v3 user that will later be used for #
-                # verifying SNMP connectivity after a Connection  #
-                # Lost event is triggered from an OVOC server.    #
-                # ----------------------------------------------- #
+                # ---------------------------------------------- #
+                # Define SNMPv3 user that will later be used for #
+                # verifying SNMP connectivity after a Connection #
+                # Lost event is triggered from an OVOC server.   #
+                # ---------------------------------------------- #
                 cli_script += 'configure system\n'
                 cli_script += ' no snmp v3-users where username CaptureScript\n'
                 cli_script += ' snmp v3-users new\n'
@@ -2520,7 +2553,7 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
 #                                                                             #
 # This function sends three types of network traffic to the targeted CPE      #
 # device once a Connection Lost event is received. The ICMP traffic and the   #
-# SNMP v3 GET requests are sent in parallel. TCP traffic is generated by      #
+# SNMPv3 GET requests are sent in parallel. TCP traffic is generated by       #
 # sending multiple connection attempts to the CPE on port 22 simulating an    #
 # SSH login attempt.                                                          #
 #                                                                             #
@@ -2609,7 +2642,7 @@ def send_traffic(logger, log_id, target_device, devices_info):
             # information to return for the current task. #
             # ------------------------------------------- #
             send_snmp_task = {}
-            send_snmp_task['task'] = 'Send UDP (SNMP v3)'
+            send_snmp_task['task'] = 'Send UDP (SNMPv3)'
             send_snmp_task['status'] = 'Failure'
             send_snmp_task['output'] = ''
             send_snmp_task['description'] = ''
@@ -2617,10 +2650,10 @@ def send_traffic(logger, log_id, target_device, devices_info):
             send_snmp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
 
             # ----------------------------------- #
-            # Send SNMP v3 request to get system  #
+            # Send SNMPv3 request to get system   #
             # description from the target device. #
             # ----------------------------------- #
-            event = 'Sending {} SNMP v3 GET requests for sysDescr.0 to target CPE device...'.format(attempts)
+            event = 'Sending {} SNMPv3 GET requests for sysDescr.0 to target CPE device...'.format(attempts)
             logger.info('{} - {}'.format(log_id, event))
             print('  + {}'.format(event))
 
@@ -2869,7 +2902,7 @@ def stop_capture(logger, log_id, max_retries, target_device, devices_info):
                 print('  + {}'.format(event))
 
                 # ----------------------------------------------- #
-                # Remove SNMP v3 user that is used for verifying  #
+                # Remove SNMPv3 user that is used for verifying   #
                 # SNMP connectivity after a Connection Lost event #
                 # was received from an OVOC server.               #
                 # ----------------------------------------------- #
