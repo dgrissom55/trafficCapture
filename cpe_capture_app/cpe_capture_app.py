@@ -44,21 +44,65 @@ Commands are sent from this script to the 'ovoc_listen_port' defined for
 the complementatry Python script ('ovoc_capture_app.py') running on the
 appropriate OVOC servers.
 
+On the CPE devices, the network captures are performed by sending REST API
+request to the targeted CPE. The REST API request contains the necessary CLI
+script to start the debug capture on the selected interfaces. Also, an SNMP
+v3 user is created to enable this script and the OVOC capture script to send
+SNMP traffic to the device after OVOC has placed the device(s) in a 
+'Connection Lost' state. In addition to the SNMP traffic, ICMP pings and TCP 
+connection requests are sent. This is to force network traffic to the device
+that will be captured by the CPE debug capture and the OVOC tcpdumps.
+
 On the OVOC servers, the network captures are performed by issuing system
 calls to the 'tcpdump' app. To start a capture on the OVOC server, this script
-sends a 'CAPTURE' command to OVOC to inform it which CPE traffic should be
-captured. The OVOC responds with a 'TRYING' when setting up the tcpdump, and
-an 'OK' when the tcpdump process is running. The response will be 'FAIL' if
-the capture fails to be started on the OVOC server. The captures are stopped
-on the OVOC after this script receives the 'Connection Lost' SNMP alarm. This
-script will send a 'STOP' message to the OVOC server to trigger it to kill the
-tcpdump process for that CPE device.
+first registers the target devices by sending a 'REGISTER' message for each
+device. The OVOC capture script receives the devices registration and creates
+an SNMP forwarding alarm on the OVOC servers for each device in order to send
+'Connection Lost' events to this CPE capture script. The OVOC capture script
+sends a '200 OK' once the device setup is complete and the alarm forwarding
+rule is setup on the OVOC server. If the forwarding rule fails to be created
+or updated, the OVOC capture script sends a '503 Service Unavailable'
+response.
 
-The following messages are exchanged:
+After the registration the CPE capture script sends a 'CAPTURE' command to
+the OVOC capture script for each targeted device to inform it which CPE
+traffic should be captured. The OVOC capture script responds with a
+'100 TRYING' when setting up the tcpdump, and a '200 OK' when the tcpdump
+process is running. The response will be a '503 Service Unavailable'
+if the tcpdump fails to start on the server.
+
+To generate ICMP, SNMPv3, and TCP connections to the target device that
+OVOC triggered the `Connection Lost` alarm on, a 'VERIFY' message is sent
+from the CPE capture script to the OVOC capture script. The `VERIFY` message
+is sent to the OVOC capture script so that both the server that is running
+the CPE capture script and the OVOC server can create traffic to send to
+the targeted CPE device. The debug capture running on the device and the
+tcpdump running on the OVOC server should capture this generated traffic.
+If there truly is a network connectivity issue, this generated traffic
+should help isolate any issues.
+
+The captures are stopped on the OVOC server after this script receives the 
+'Connection Lost' SNMP alarm. This script will send a 'STOP' message to the
+OVOC capture script to trigger it to kill the tcpdump process for that CPE
+device.
+
+For a normal flow, the following messages are exchanged:
 
   CPE script                                 This script
        |                                           |
+       |-------- REGISTER <device address> ------->|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
        |-------- CAPTURE <device address> -------->|
+       |                                           |
+       |<------ 100 TRYING <device address> -------|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
+       |     (WAIT FOR CONNECTION LOST EVENT)      |
+       |                                           |
+       |--------- VERIFY <device address> -------->|
        |                                           |
        |<------ 100 TRYING <device address> -------|
        |                                           |
@@ -71,11 +115,12 @@ The following messages are exchanged:
        |<-------- 200 OK <device address> ---------|
        |                                           |
 
-If this script receives a request and the device address is not found in the
-devices information dictionary, then a '404 Not Found' is returned.
+If the OVOC capture script receives a request and the device address is not
+found in the devices information dictionary, then a '404 Not Found' is
+returned.
 
-If the capture fails to be started or fails to stop, then the response will
-be a '503 Service Unavailable'.
+If the OVOC capture fails to be started or fails to stop, then the response
+will be a '503 Service Unavailable'.
 
 This script tracks capture states, all tasks, and other information for each
 targeted CPE device. The 'devices_info' dictionary is created to track each
@@ -121,8 +166,8 @@ The following is an example of what is tracked:
               "registration": "active|not active|aborted",
               "registerAttempts": <some value>,
               "events": <some value>,
-              "lastRequest": "REGISTER|CAPTURE|STOP",
-              "lastResponse": "<some response>",
+              "lastRequest": "REGISTER|CAPTURE|VERIFY|STOP",
+              "lastResponse": "100 Trying|200 OK|404 Not Found|503 Service Unavailable",
               "lastCapture": "<stored CPE capture filename>
           },
 
@@ -145,6 +190,7 @@ import json
 import logging
 import requests
 import base64
+import subprocess
 import json
 import time
 import socket
@@ -2346,6 +2392,8 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
             attempt = 1
             while attempt <= max_retries and not submitted:
 
+                cli_script = ''
+
                 # ---------------------------------------- #
                 # Attempt to start debug capture on device #
                 # ---------------------------------------- #
@@ -2353,12 +2401,29 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
+                # ---------------------------------------------- #
+                # Define SNMPv3 user that will later be used for #
+                # verifying SNMP connectivity after a Connection #
+                # Lost event is triggered from an OVOC server.   #
+                # ---------------------------------------------- #
+                cli_script += 'configure system\n'
+                cli_script += ' no snmp v3-users where username CaptureScript\n'
+                cli_script += ' snmp v3-users new\n'
+                cli_script += '  user CaptureScript\n'
+                cli_script += '  auth-protocol sha-1\n'
+                cli_script += '  priv-protocol aes-128\n'
+                cli_script += '  auth-key Capture01!\n'
+                cli_script += '  priv-key Capture01!\n'
+                cli_script += ' exit\n'
+                cli_script += 'exit\n'
+                cli_script += 'write\n'
+
                 if device['type'] == 'MSBR':
 
                     # ---------------------------------------------------------- #
                     # Build commands to start capture on defined MSBR interfaces #
                     # ---------------------------------------------------------- #
-                    cli_script = 'debug capture data physical stop\n'
+                    cli_script += 'debug capture data physical stop\n'
                     for interface in device['interfaces']:
                         cli_script += 'debug capture data physical {}\n'.format(interface)
                     cli_script += 'debug capture data physical start\n'
@@ -2368,7 +2433,7 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
                     # ------------------------------------------------------------ #
                     # Build commands to start capture on defined GW/SBC interfaces #
                     # ------------------------------------------------------------ #
-                    cli_script = 'debug_capture voip physical stop\n'
+                    cli_script += 'debug_capture voip physical stop\n'
                     for interface in device['interfaces']:
                         cli_script += 'debug capture voip physical {}\n'.format(interface)
                     cli_script += 'debug_capture voip physical start\n'
@@ -2418,13 +2483,10 @@ def start_capture(logger, log_id, max_retries, target_device, devices_info):
                     print('  + {}'.format(event))
 
                     if device['type'] == 'MSBR':
-                        cli_script = """
-debug capture data physical show
-                        """
+                        cli_script = 'debug capture data physical show\n'
                     else:
-                        cli_script = """
-debug capture voip physical show
-                        """
+                        cli_script = 'debug capture voip physical show\n'
+
                     verify_started_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
                     # --------------- #
@@ -2478,6 +2540,304 @@ debug capture voip physical show
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
+        event = 'Device not found in monitored devices list!'
+        logger.error('{} - {}'.format(log_id, event))
+        print('  + ERROR: {}'.format(event))
+
+    return
+
+# --------------------------------------------------------------------------- #
+# FUNCTION: send_traffic                                                      #
+#                                                                             #
+# This function sends three types of network traffic to the targeted CPE      #
+# device once a Connection Lost event is received. The ICMP traffic and the   #
+# SNMPv3 GET requests are sent in parallel. TCP traffic is generated by       #
+# sending multiple connection attempts to the CPE on port 22 simulating an    #
+# SSH login attempt.                                                          #
+#                                                                             #
+# This function will wait until all the traffic has been sent to the device   #
+# before returning.                                                           #
+#                                                                             #
+# Parameters:                                                                 #
+#     logger        - File handler for storing logged actions                 #
+#     log_id        - Unique identifier for this devices log entries          #
+#     target_device - CPE device to start network traffic capture on          #
+#     devices_info  - Dictionary of targeted devices                          #
+#                                                                             #
+# Return:                                                                     #
+#    devices_info - Modified dictionary containing a record for each device   #
+#                   that contains all the tasks executed against that device. #
+# --------------------------------------------------------------------------- #
+def send_traffic(logger, log_id, target_device, devices_info):
+    """Generate ICMP, SNMP, and TCP traffic to send to the target CPE device."""
+
+    # ------------------------------ #
+    # Attempts for each traffic type #
+    # ------------------------------ #
+    attempts = 10
+
+    device_found = False
+    device_index = 0
+    for device in devices_info['devices']:
+        if device['device'] == target_device:
+
+            device_found = True
+            event = 'Found device in devices information dictionary at index: [{}]'.format(device_index)
+            logger.debug('{} - {}'.format(log_id, event))
+
+            event = 'Sending network traffic to CPE device #{}: [{}]'.format(device_index + 1, target_device)
+            logger.info('{} - {}'.format(log_id, event))
+            print('{}'.format(event))
+
+            # ------------------------------------------------------- #
+            # Track information to summarize each devices info record #
+            # ------------------------------------------------------- #
+            device_status = ''
+            device_severity = ''
+            description = ''
+
+            # ------------------------------------------------------ #
+            # List to hold the objects returned from the calls to    #
+            # 'subprocess' below for the ICMP and SNMP traffic. Will #
+            # be used to wait for those spawned processes to finish. #
+            # ------------------------------------------------------ #
+            processes = []
+
+            DEVNULL = open(os.devnull, 'w')
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_icmp_task = {}
+            send_icmp_task['task'] = 'Send ICMP (Ping)'
+            send_icmp_task['status'] = 'Failure'
+            send_icmp_task['output'] = ''
+            send_icmp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_icmp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ------------------------------------ #
+            # Send ICMP pings to the target device #
+            # ------------------------------------ #
+            event = 'Sending {} ICMP pings to target CPE device...'.format(attempts)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            attempt = 1
+            while attempt <= attempts:
+
+                command = 'sleep ' + str(attempt) + '; ping -c 1 ' + target_device
+                event = 'Command: ' + command
+                logger.debug('{} - {}'.format(log_id, event))
+                icmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+                processes.append(icmp_process)
+
+                attempt += 1
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_snmp_task = {}
+            send_snmp_task['task'] = 'Send UDP (SNMPv3)'
+            send_snmp_task['status'] = 'Failure'
+            send_snmp_task['output'] = ''
+            send_snmp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_snmp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ----------------------------------- #
+            # Send SNMPv3 request to get system   #
+            # description from the target device. #
+            # ----------------------------------- #
+            event = 'Sending {} SNMPv3 GET requests for sysDescr.0 to target CPE device...'.format(attempts)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            attempt = 1
+            while attempt <= attempts:
+
+                command = 'sleep ' + str(attempt) + '; snmpget -v 3 -r 0 -n "" -u CaptureScript -a SHA -l authPriv -A Capture01! -X Capture01! -x AES ' + target_device + ' sysDescr.0'
+                event = 'Command: ' + command
+                logger.debug('{} - {}'.format(log_id, event))
+                snmp_process = subprocess.Popen(command, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+                processes.append(snmp_process)
+
+                attempt += 1
+
+            # ------------------------------------------- #
+            # Create a dictionary to hold the relevant    #
+            # information to return for the current task. #
+            # ------------------------------------------- #
+            send_tcp_task = {}
+            send_tcp_task['task'] = 'Send TCP (Port 443)'
+            send_tcp_task['status'] = 'Failure'
+            send_tcp_task['output'] = ''
+            send_tcp_task['description'] = ''
+            task_timestamp = datetime.now()
+            send_tcp_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+
+            # ------------------------------------ #
+            # Send TCP connection attempts to port #
+            # 443 on target device.                #
+            # ------------------------------------ #
+            event = 'Sending {} TCP connection requests to port 443 on target CPE device...'.format(attempts)
+            logger.info('{} - {}'.format(log_id, event))
+            print('  + {}'.format(event))
+
+            tcp_failures = 0
+            attempt = 1
+            while attempt <= attempts:
+
+                # ----------------------------------------------- #
+                # Attempt to connect to port 443 on target device #
+                # ----------------------------------------------- #
+                event = 'Attempting to connect to port 443 on CPE device...'
+                logger.info('{} - {}'.format(log_id, event))
+                #print('  + {}'.format(event))
+
+                try:
+                    socket.setdefaulttimeout(1)
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.connect((target_device, 443))
+                except Exception as error:
+                    tcp_failures += 1
+                    if type(error) is list:
+                        if len(error) > 1:
+                            error = str(error[1])
+                        else:
+                            error = str(error[0])
+                    error = str(error)
+                    error = re.sub('\[|\]', '', error)
+                    event = 'TCP attempt {} failed: {}.'.format(attempt, error)
+                    logger.warning('{} - {}'.format(log_id, event))
+                    send_tcp_task['output'] += error + ' '
+                else:
+                    event = 'TCP attempt {} SYN ACK received.'.format(attempt)
+                    logger.info('{} - {}'.format(log_id, event))
+                    send_tcp_task['output'] += event + ' '
+                    s.close()
+
+                attempt += 1
+
+            # -------------------------------------------------------- #
+            # Wait for spawned tasks to complete if necessary and get  #
+            # their shell status. Status '0' means the spawned process #
+            # executed with no errors.                                 #
+            # -------------------------------------------------------- #
+            results = [p.wait() for p in processes]
+            event = 'Results list: {}'.format(results)
+            logger.debug('{} - {}'.format(log_id, event))
+
+            device_status = 'Success'
+
+            # ---------------------------------------- #
+            # Results 0 to (attempts-1) are associated #
+            # with the ICMP pings attempts.            #
+            # ---------------------------------------- #
+            icmp_failures = 0
+            attempt = 1
+            for index in range(0, attempts):
+                if len(results) - 1 >= index:
+                    if results[index] != 0:
+                        icmp_failures += 1
+                        event = 'ICMP attempt {} failed.'.format(attempt)
+                        logger.warning('{} - {}'.format(log_id, event))
+                    else:
+                        event = 'ICMP attempt {} received response.'.format(attempt)
+                        logger.info('{} - {}'.format(log_id, event))
+                    send_icmp_task['output'] += event + ' '
+                else:
+                    event = 'Result not found for ICMP request {}'.format(attempt)
+                    logger.error('{} - {}'.format(log_id, event))
+
+                attempt += 1
+
+            if icmp_failures == 0:
+                event = 'Successfully sent all ICMP pings to device.'
+                logger.info('{} - {}'.format(log_id, event))
+                send_icmp_task['status'] = 'Success'
+                print('    - INFO: {}'.format(event))
+            else:
+                device_status = 'Failure'
+                event = 'Failed to receive response to {} out of 10 ICMP pings!'.format(icmp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_icmp_task['description'] = event
+            device['tasks'].append(send_icmp_task.copy())
+
+            # ----------------------------------------- #
+            # Results (attempts) to (attempts*2) are    #
+            # associated with the 10 SNMP GET attempts. #
+            # ----------------------------------------- #
+            snmp_failures = 0
+            attempt = 1
+            for index in range(attempts, attempts*2):
+                if len(results) - 1 >= index:
+                    if results[index] != 0:
+                        snmp_failures += 1
+                        event = 'SNMP attempt {} failed'.format(attempt)
+                        logger.warning('{} - {}'.format(log_id, event))
+                    else:
+                        event = 'SNMP attempt {} received response.'.format(attempt)
+                        logger.info('{} - {}'.format(log_id, event))
+                    send_snmp_task['output'] += event + ' '
+                else:
+                    event = 'Result not found for SNMP request {}'.format(attempt)
+                    logger.error('{} - {}'.format(log_id, event))
+
+                attempt += 1
+
+            if snmp_failures == 0:
+                event = 'Successfully sent all SNMP GET requests to device.'
+                logger.info('{} - {}'.format(log_id, event))
+                send_snmp_task['status'] = 'Success'
+                print('    - INFO: {}'.format(event))
+            else:
+                device_status = 'Failure'
+                event = 'Failed to receive response to {} out of 10 SNMP GET requests!'.format(snmp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_snmp_task['description'] = event
+            device['tasks'].append(send_snmp_task.copy())
+
+            # ----------------------------------- #
+            # Results for TCP connection attempts #
+            # ----------------------------------- #
+            if tcp_failures == 0:
+                event = 'Successfully sent all TCP connection requests to device.'
+                logger.info('{} - {}'.format(log_id, event))
+                send_tcp_task['status'] = 'Success'
+                print('    - INFO: {}'.format(event))
+            else:
+                device_status = 'Failure'
+                event = 'Failed to receive response to {} out of 10 TCP connection requests!'.format(tcp_failures)
+                logger.warning('{} - {}'.format(log_id, event))
+                print('    - WARNING: {}'.format(event))
+            send_tcp_task['description'] = event
+            device['tasks'].append(send_tcp_task.copy())
+
+            # -------------------------------------- #
+            # Store task information at device level #
+            # -------------------------------------- #
+            device['status'] = device_status
+            device['description'] = send_icmp_task['description'] + ' ' + send_snmp_task['description'] + ' ' + send_tcp_task['description']
+
+            if icmp_failures == 0 and snmp_failures == 0 and tcp_failures == 0:
+                device['severity'] = 'NORMAL'
+            else:
+                device['severity'] = 'CRITICAL'
+
+            break
+
+        device_index += 1
+
+    if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -2532,6 +2892,8 @@ def stop_capture(logger, log_id, max_retries, target_device, devices_info):
             attempt = 1
             while attempt <= max_retries and not submitted:
 
+                cli_script = ''
+
                 # --------------------------------------- #
                 # Attempt to stop debug capture on device #
                 # --------------------------------------- #
@@ -2539,10 +2901,23 @@ def stop_capture(logger, log_id, max_retries, target_device, devices_info):
                 logger.info('{} - {}'.format(log_id, event))
                 print('  + {}'.format(event))
 
+                # ----------------------------------------------- #
+                # Remove SNMPv3 user that is used for verifying   #
+                # SNMP connectivity after a Connection Lost event #
+                # was received from an OVOC server.               #
+                # ----------------------------------------------- #
+                cli_script += 'configure system\n'
+                cli_script += ' no snmp v3-users where username CaptureScript\n'
+                cli_script += 'exit\n'
+                cli_script += 'write\n'
+
+                # -------------------------------- #
+                # CLI script to stop debug capture #
+                # -------------------------------- #
                 if device['type'] == 'MSBR':
-                    cli_script = 'debug capture data physical stop'
+                    cli_script += 'debug capture data physical stop\n'
                 else:
-                    cli_script = 'debug capture voip physical stop'
+                    cli_script += 'debug capture voip physical stop\n'
 
                 stop_capture_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
@@ -2583,9 +2958,9 @@ def stop_capture(logger, log_id, max_retries, target_device, devices_info):
                     print('  + {}'.format(event))
 
                     if device['type'] == 'MSBR':
-                        cli_script = 'debug capture data physical show'
+                        cli_script = 'debug capture data physical show\n'
                     else:
-                        cli_script = 'debug capture voip physical show'
+                        cli_script = 'debug capture voip physical show\n'
 
                     verify_stopped_task = send_cli_script(logger, log_id, cli_script, target_device, device['username'], device['password'])
 
@@ -2646,6 +3021,8 @@ def stop_capture(logger, log_id, max_retries, target_device, devices_info):
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -2801,6 +3178,8 @@ def retrieve_capture(logger, log_id, max_retries, target_device, devices_info):
         device_index += 1
 
     if not device_found:
+        device['status'] = 'Failure'
+        device['severity'] = 'CRITICAL'
         event = 'Device not found in monitored devices list!'
         logger.error('{} - {}'.format(log_id, event))
         print('  + ERROR: {}'.format(event))
@@ -3332,6 +3711,42 @@ def main(argv):
                                     event = 'Incrementing events counter to: [{}]'.format(device['events'])
                                     logger.info('{} - {}'.format(log_id, event))
                                     device_events = device['events']
+
+                                    # ------------------------------------------------------ #
+                                    # Send VERIFY command to OVOC capture app script. This   #
+                                    # will trigger the script that is running on the OVOC    #
+                                    # server to generate multiple traffic types (ICMP, SNMP, #
+                                    # and TCP) to send to the target device. This will help  #
+                                    # verify whether or not the OVOC server has network      #
+                                    # connectivity to the CPE device.                        #
+                                    # ------------------------------------------------------ #
+                                    this_request = 'VERIFY {}'.format(device['device'])
+                                    event = 'Sending message to verify network communication from OVOC server: [{}]'.format(this_request)
+                                    logger.info('{} - {}'.format(log_id, event))
+                                    print('  + {}'.format(event))
+                                    if send_request(logger, log_id, server_socket, this_request, device['ovoc']):
+                                        event = 'Sent request to verify network communication from OVOC server.'
+                                        logger.info('{} - {}'.format(log_id, event))
+                                        print('    - INFO: {}'.format(event))
+
+                                        # ------------------------------------------------------ #
+                                        # Save this command request in 'devices_info' dictionary #
+                                        # ------------------------------------------------------ #
+                                        device['lastRequest'] = 'VERIFY'
+
+                                    else:
+                                        event = 'Failed to send request to verify network communication from OVOC server!'
+                                        logger.error('{} - {}'.format(log_id, event))
+                                        print('    - ERROR: {}'.format(event))
+                                        device['lastRequest'] = ''
+
+                                    # ----------------------------------------------- #
+                                    # Generate and send ICMP, SNMP, and TCP traffic   #
+                                    # from this server as well to verify network      #
+                                    # connectivity to the CPE. This will give another #
+                                    # point in the network to verify communications.  #
+                                    # ----------------------------------------------- #
+                                    send_traffic(logger, log_id, device_with_alarm, devices_info)
 
                                     # -------------------------- #
                                     # Stop capture on CPE device #

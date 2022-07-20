@@ -71,6 +71,18 @@
 <details>
   <summary><h2>Change Log</h2></summary>
 
+## v1.0.4
+
+### Added or Changed
+- Added the feature to send ICMP, SNMPv3 messaging, and TCP connection requests to devices that trigger a 'Connection Lost' event on an OVOC server.
+     The generated traffic is sent from both the CPE capture script server and the OVOC server.
+- Automatically added OVOC alarm forwarding rules are cleaned up from the OVOC capture script if the device in the dictionary has been idle for 2 hours.
+
+## v1.0.3
+
+### Added or Changed
+- Bug fixes
+
 ## v1.0.2
 
 ### Added or Changed
@@ -121,27 +133,46 @@ There are a mimimum of two scripts that will be required to be run. The followin
 
 <b>Detailed Descriptions:</b>
 
-Running the 'cpe_capture_app.py' script on a separate server other than an OVOC server is required since the goal is to understand why an OVOC server may be losing connectivity with the CPE devices. The intent is that the separate server will not have any loss of connectivity to the CPE device and will be able to remain in communications with the CPE to issue REST API commands to control and retrieve debug captures without failure.
+Running the `cpe_capture_app.py` script on a separate server other than an OVOC server is required since the goal is to understand why an OVOC server may be losing connectivity with the CPE devices. The intent is that the separate server will not have any loss of connectivity to the CPE device and will be able to remain in communications with the CPE to issue REST API commands to control and retrieve debug captures without failure.
 
 The goal is the attempt catch an event where SNMP traffic is not being seen on the CPE device and it loses management connectivity with the OVOC server.
 
-A major part of the interactive input to the CPE capture script (`cpe_capture_app.py`) is the creation of a list of CPE devices and their associated OVOC servers. The commands to start/stop the debug capture on the audiocodes CPE is sent via REST API to the devices defined from the interactive entries. The traffic captures on the CPE's associated OVOC servers are started and stopped using UDP signaling. Commands are sent from the CPE capture script to the `listen_port` defined for the complementatry OVOC capture Python script (`ovoc_capture_app.py`) running on the appropriate OVOC servers.
+A major part of the interactive input to this script is the creation of a list of CPE devices and their associated OVOC servers. The commands to start/stop the debug capture on the audiocodes CPE is sent via REST API to the devices defined from the interactive entries. The traffic captures on the CPE's associated OVOC servers are started and stopped using UDP signaling.  Commands are sent from this script to the `ovoc_listen_port` defined for the complementatry Python script (`ovoc_capture_app.py`) running on the appropriate OVOC servers.
 
-On the OVOC servers, the network captures are performed by issuing system calls to the `tcpdump` app. To start a capture on the OVOC server, the CPE capture script sends a `CAPTURE` command to the appropriate OVOC server to inform it which CPE traffic should be captured. The OVOC capture script responds with a `TRYING` when setting up the tcpdump, and then an `OK` response when the tcpdump process is running. The response will be `FAIL` if the capture fails to be started on the OVOC server.
+On the CPE devices, the network captures are performed by sending REST API request to the targeted CPE. The REST API request contains the necessary CLI script to start the debug capture on the selected interfaces. Also, an SNMP v3 user is created to enable this script and the OVOC capture script to send SNMP traffic to the device after OVOC has placed the device(s) in a `Connection Lost` state. In addition to the SNMP traffic, ICMP pings and TCP connection requests are sent. This is to force network traffic to the device that will be captured by the CPE debug capture and the OVOC tcpdumps.
 
-The captures on both the CPE device and the OVOC server are stopped after the `cpe_capture_app.py` script receives the `Connection Lost` SNMP alarm. Each OVOC server in this version of the project must be manually configured with a SNMP forwarding rule to send any received `Connection Lost` alarms to the CPE capture script.
+On the OVOC servers, the network captures are performed by issuing system calls to the `tcpdump` app. To start a capture on the OVOC server, this script first registers the target devices by sending a `REGISTER` message for each device. The OVOC capture script receives the devices registration and creates an SNMP forwarding alarm on the OVOC servers for each device in order to send `Connection Lost` events to this CPE capture script. The OVOC capture script sends a `200 OK` once the device setup is complete and the alarm forwarding rule is setup on the OVOC server. If the forwarding rule fails to be created or updated, the OVOC capture script sends a `503 Service Unavailable` response.
+
+After the registration the CPE capture script sends a `CAPTURE` command to the OVOC capture script for each targeted device to inform it which CPE traffic should be captured. The OVOC capture script responds with a `100 TRYING` when setting up the tcpdump, and a `200 OK` when the tcpdump process is running. The response will be a `503 Service Unavailable` if the tcpdump fails to start on the server.
+
+To generate ICMP, SNMPv3, and TCP connections to the target device that OVOC triggered the `Connection Lost` alarm on, a 'VERIFY' message is sent from the CPE capture script to the OVOC capture script. The `VERIFY` message is sent to the OVOC capture script so that both the server that is running the CPE capture script and the OVOC server can create traffic to send to the targeted CPE device. The debug capture running on the device and the tcpdump running on the OVOC server should capture this generated traffic. If there truly is a network connectivity issue, this generated traffic should help isolate any issues.
+
+The captures are stopped on the OVOC server after this script receives the `Connection Lost` SNMP alarm. This script will send a `STOP` message to the OVOC capture script to trigger it to kill the tcpdump process for that CPE device.
+
 <p>
   (<a href="#ovoc">See the OVOC server prerequisites below.</a>)
 </p>
 
 The alarm forwarded from the OVOC servers should be in `SYSLOG` format so that the `cpe_capture_app.py` script can properly parse the contents of the alarm. This SNMP alarm forwarding rule will be automatically created in the appropriate OVOC servers in future releases. Once the alarm has been processed, the CPE capture script will send a `STOP` message to the OVOC server to trigger it to kill the tcpdump process for that CPE device. The `STOP` message also contains the filename of the PCAP capture file retrieved from an SFTP transfer of a stopped CPE `debug capture`. The OVOC server renameds its `tcpdump` files to match the filename of the CPE device for easier correlation.
 
-The following messages are exchanged:
+For a normal flow, the following messages are exchanged:
 
   ```sh
 CPE capture script                         OVOC capture server
        |                                           |
+       |-------- REGISTER <device address> ------->|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
        |-------- CAPTURE <device address> -------->|
+       |                                           |
+       |<------ 100 TRYING <device address> -------|
+       |                                           |
+       |<-------- 200 OK <device address> ---------|
+       |                                           |
+       |     (WAIT FOR CONNECTION LOST EVENT)      |
+       |                                           |
+       |--------- VERIFY <device address> -------->|
        |                                           |
        |<------ 100 TRYING <device address> -------|
        |                                           |
@@ -153,15 +184,14 @@ CPE capture script                         OVOC capture server
        |                                           |
        |<-------- 200 OK <device address> ---------|
        |                                           |
+
   ```
 
-If this script receives a request and the device address is not found in the
-devices information dictionary, then a `404 Not Found` is returned.
+If this script receives a request and the device address is not found in the devices information dictionary, then a `404 Not Found` is returned.
 
-If the capture fails to be started or fails to stop, then the response will
-be a `503 Service Unavailable`.
+If the capture fails to be started or fails to stop, then the response will be a `503 Service Unavailable`.
 
-The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
+The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The `devices_info` dictionary is created to track each devices information. The following is an example of what is tracked:
 
   ```sh
   {
@@ -202,7 +232,7 @@ The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, an
               "registration": "active|not active|aborted",
               "registerAttempts": <some value>,
               "events": <some value>,
-              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastRequest": "REGISTER|CAPTURE|VERIFY|STOP",
               "lastResponse": "<some response>",
               "lastCapture": "<stored CPE capture filename>
           },
@@ -213,7 +243,7 @@ The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, an
   }
   ```
 
-The OVOC capture script `ovoc_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The 'devices_info' dictionary is created to track each devices information. The following is an example of what is tracked:
+The OVOC capture script `ovoc_capture_app.py` tracks capture states, all tasks, and other information for each targeted CPE device. The `devices_info` dictionary is created to track each devices information. The following is an example of what is tracked:
 
   ```sh
   {
@@ -236,15 +266,16 @@ The OVOC capture script `ovoc_capture_app.py` tracks capture states, all tasks, 
                       "ruleId": <some value>
                   }, 
               ], 
+              "registration": "active|not active",
+              "regTime": seconds since epoch,
+              "ovocCapture": "not active", 
               "cpeFilename": "<filename of stored CPE capture file on CPE script>
               "tempCapture": "<local tcpdump filename before renamed to match CPE filename>", 
               "pid": "<some PID of tcpdump process>", 
               "ovocCapture0": "<filename 1 from OVOC tcpdump capture that matches CPE filename>",
               "ovocCapture1": "<filename 2 from OVOC tcpdump capture that matches CPE filename>",
               "ovocCapture2": "<filename 3 from OVOC tcpdump capture that matches CPE filename>",
-              "registration": "active|not active",
-              "ovocCapture": "not active", 
-              "lastRequest": "REGISTER|CAPTURE|STOP",
+              "lastRequest": "REGISTER|CAPTURE|VERIFY|STOP",
               "lastResponse": "200 OK", 
           },
 
@@ -745,7 +776,7 @@ Project Link: [https://github.com/dgrissom55/trafficCapture](https://github.com/
 [license-url]: https://github.com/dgrissom55/trafficCapture/blob/master/LICENSE.txt
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/linkedin_username
-[product-screenshot]: images/capturing_flow_v1.0.2.png
+[product-screenshot]: images/capturing_flow_v1.0.4.png
 [select-devices-screenshot]: images/alarm_fwd_select_devices.png
 [select-alarms-screenshot]: images/alarm_fwd_select_alarm.png
 [select-destination-screenshot]: images/alarm_fwd_set_type_and_destination.png
