@@ -71,6 +71,11 @@
 <details>
   <summary><h2>Change Log</h2></summary>
 
+## v1.0.5
+
+### Added or Changed
+- Bug fix to correct setting the status after connecting to the device to pull its debug capture file fails.
+
 ## v1.0.4
 
 ### Added or Changed
