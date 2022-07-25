@@ -3089,6 +3089,7 @@ def retrieve_capture(logger, log_id, max_retries, target_device, devices_info):
 
                     retrieve_capture_task = {}
                     retrieve_capture_task['task'] = 'Retrieve capture'
+                    retrieve_capture_task['status'] = 'Failure'
                     retrieve_capture_task['description'] = 'Failed to retrieve capture from device!'
                     task_timestamp = datetime.now()
                     retrieve_capture_task['timestamp'] = task_timestamp.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
