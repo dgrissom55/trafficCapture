@@ -3122,7 +3122,7 @@ def start_capture(logger, log_id, target_device, interface_name, devices_info):
                     print('  - ERROR: {}'.format(event))
                 else:
                     start_capture_task['status'] = 'Success'
-                    event = 'Started capture on device as file: [{}]'.format(filename)
+                    event = 'Started capture for device to file: [{}]'.format(filename)
                     start_capture_task['description'] = event
                     started = True
 
@@ -4299,95 +4299,106 @@ def main(argv):
             # ---------------------- #
             # Parse received message #
             # ---------------------- #
-            msg_info = parse_message(logger, log_id, message.decode('utf-8'))
+            msg_info = {}
+            msg_info['type'] = 'unknown'
+            try:
+                decoded_message = message.decode('utf-8')
+                msg_info = parse_message(logger, log_id, decoded_message)
+            except Exception as err:
+                event = 'Error decoding UDP message: {}'.format(err)
+                logger.error('{} - {}'.format(log_id, event))
+            else:
 
-            # --------------------------------------- #
-            # Process CPE capture app script requests #
-            # --------------------------------------- #
-            if msg_info['type'] == 'request':
+                # --------------------------------------- #
+                # Process CPE capture app script requests #
+                # --------------------------------------- #
+                if msg_info['type'] == 'request':
 
-                target_device = msg_info['device']
-                event = 'Received [{}] request from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
-                logger.info('{} - {}'.format(log_id, event))
-                print('{}'.format(event))
+                    target_device = msg_info['device']
+                    event = 'Received [{}] request from CPE script controlling device: [{}]'.format(msg_info['request'], target_device)
+                    logger.info('{} - {}'.format(log_id, event))
+                    print('{}'.format(event))
 
-                # ------------------------------------------------------- #
-                # If a 'REGISTER' request has been received, then add the #
-                # device to the 'devices_info' dictionary and then create #
-                # an SNMP alarm forwarding rule to send 'Connection Lost' #
-                # events to the devices CPE capture script.               #
-                # ------------------------------------------------------- #
-                if msg_info['request'] == 'REGISTER':
+                    # ------------------------------------------------------- #
+                    # If a 'REGISTER' request has been received, then add the #
+                    # device to the 'devices_info' dictionary and then create #
+                    # an SNMP alarm forwarding rule to send 'Connection Lost' #
+                    # events to the devices CPE capture script.               #
+                    # ------------------------------------------------------- #
+                    if msg_info['request'] == 'REGISTER':
 
-                    process_register(logger, log_id, server_socket, from_address, target_device, ovoc_credentials, devices_info)
+                        process_register(logger, log_id, server_socket, from_address, target_device, ovoc_credentials, devices_info)
 
-                # ---------------------------------------------------- #
-                # If a 'CAPTURE' request has been received, then start #
-                # 'tcpdump' capturing for this specific device.        #
-                # ---------------------------------------------------- #
-                elif msg_info['request'] == 'CAPTURE':
+                    # ---------------------------------------------------- #
+                    # If a 'CAPTURE' request has been received, then start #
+                    # 'tcpdump' capturing for this specific device.        #
+                    # ---------------------------------------------------- #
+                    elif msg_info['request'] == 'CAPTURE':
 
-                    process_capture(logger, log_id, server_socket, from_address, target_device, interface_name, devices_info)
+                        process_capture(logger, log_id, server_socket, from_address, target_device, interface_name, devices_info)
 
-                # --------------------------------------------------- #
-                # If a 'VERIFY' request has been received, then start #
-                # generating ICMP, SNMP, and TCP traffic for this     #
-                # specific device.                                    #
-                # --------------------------------------------------- #
-                elif msg_info['request'] == 'VERIFY':
+                    # --------------------------------------------------- #
+                    # If a 'VERIFY' request has been received, then start #
+                    # generating ICMP, SNMP, and TCP traffic for this     #
+                    # specific device.                                    #
+                    # --------------------------------------------------- #
+                    elif msg_info['request'] == 'VERIFY':
 
-                    process_verify(logger, log_id, server_socket, from_address, target_device, devices_info)
+                        process_verify(logger, log_id, server_socket, from_address, target_device, devices_info)
 
-                # ------------------------------------------------ #
-                # If a 'STOP' request has been received, then stop #
-                # 'tcpdump' capturing for this specific device.    #
-                # ------------------------------------------------ #
-                elif msg_info['request'] == 'STOP':
+                    # ------------------------------------------------ #
+                    # If a 'STOP' request has been received, then stop #
+                    # 'tcpdump' capturing for this specific device.    #
+                    # ------------------------------------------------ #
+                    elif msg_info['request'] == 'STOP':
 
-                    process_stop(logger, log_id, server_socket, from_address, target_device, msg_info['filename'], devices_info)
+                        process_stop(logger, log_id, server_socket, from_address, target_device, msg_info['filename'], devices_info)
+
+                    else:
+                        event = 'Received unknown request [{}] to process!'.format(msg_info['request'])
+                        logger.warning('{} - {}'.format(log_id, event))
+                        print('  + WARNING: {}'.format(event))
 
                 else:
-                    event = 'Received unknown request [{}] to process!'.format(msg_info['request'])
+                    event = 'Received unknown message to process! Check logs for details.'
                     logger.warning('{} - {}'.format(log_id, event))
                     print('  + WARNING: {}'.format(event))
 
-            else:
-                event = 'Received unknown message to process! Check logs for details.'
-                logger.warning('{} - {}'.format(log_id, event))
-                print('  + WARNING: {}'.format(event))
+                # ------------------------------------------------- #
+                # Check for any CPE devices actively being captured #
+                # ------------------------------------------------- #
+                now_time = int(time.time())
+                if prevent_shutdown:
+                    active_captures = 1
+                else:
+                    active_captures = 0
+                    for device in devices_info['devices']:
+                        if device['ovocCapture'].lower() == 'active':
+                            active_captures += 1
 
-            # ------------------------------------------------- #
-            # Check for any CPE devices actively being captured #
-            # ------------------------------------------------- #
-            now_time = int(time.time())
-            if prevent_shutdown:
-                active_captures = 1
-            else:
-                active_captures = 0
-                for device in devices_info['devices']:
-                    if device['ovocCapture'].lower() == 'active':
-                        active_captures += 1
+                        # ------------------------------------------- #
+                        # Cleanup any configuration for stale devices #
+                        # that have not been active for over 2 hours. #
+                        # ------------------------------------------- #
+                        if device['ovocCapture'].lower() == 'not active':
+                            if 'regTime' in device:
+                                if now_time - device['regTime'] > 7200:
+                                    rule_name = 'Forward Connection Lost from {}'.format(device['device'])
+                                    delete_alarm_fwd_rule(logger, log_id, device['device'], rule_name, ovoc_credentials, devices_info)
 
-                    # ------------------------------------------- #
-                    # Cleanup any configuration for stale devices #
-                    # that have not been active for over 2 hours. #
-                    # ------------------------------------------- #
-                    if device['ovocCapture'].lower() == 'not active':
-                        if 'regTime' in device:
-                            if now_time - device['regTime'] > 7200:
-                                rule_name = 'Forward Connection Lost from {}'.format(device['device'])
-                                delete_alarm_fwd_rule(logger, log_id, device['device'], rule_name, ovoc_credentials, devices_info)
+                # ------------------------------------------------ #
+                # For debugging - Output 'devices_info' dictionary #
+                # ------------------------------------------------ #
+                #event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
+                event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
+                logger.debug('{} - {}'.format(log_id, event))
 
-            # ------------------------------------------------ #
-            # For debugging - Output 'devices_info' dictionary #
-            # ------------------------------------------------ #
-            #event = 'Devices Info:\n{}'.format(secure_json_dump(logger, log_id, devices_info, ['password']))
-            event = 'Devices Info:\n{}'.format(json.dumps(devices_info, indent=4))
-            logger.debug('{} - {}'.format(log_id, event))
-
-            #event = 'Listening for script messaging on UDP port: [{}]'.format(listen_port)
-            #logger.info('{} - {}'.format(log_id, event))
-            #print('{}'.format(event))
+            # ------------------------------------------- #
+            # Check if rotation of log files is necessary #
+            # ------------------------------------------- #
+            if rotate_logs(logger, log_id, config.app_log_file, config.app_max_log_file_size, config.app_archived_files):
+                event = 'Rotation of log files completed'
+                logger.info('{} - {}'.format(log_id, event))
 
         event = 'All devices have completed'
         logger.info('{} - {}'.format(log_id, event))

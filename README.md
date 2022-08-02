@@ -71,6 +71,12 @@
 <details>
   <summary><h2>Change Log</h2></summary>
 
+## v1.0.6
+
+### Added or Changed
+- Handle empty UDP messages from OVOC servers.
+- Check to rotate logs added to end of socket loops.
+
 ## v1.0.5
 
 ### Added or Changed
