@@ -4290,9 +4290,12 @@ def main(argv):
         while (len(devices_info['devices']) == 0 or active_captures > 0):
 
             bytes_address_pair = server_socket.recvfrom(buffer_size)
-            message = bytes_address_pair[0]
-            from_address = bytes_address_pair[1]
 
+            message = bytes_address_pair[0]
+            event = 'UDP message: [{}]'.format(from_address)
+            logger.debug('{} - {}'.format(log_id, event))
+
+            from_address = bytes_address_pair[1]
             event = 'UDP message from: [{}]'.format(from_address)
             logger.info('{} - {}'.format(log_id, event))
 
