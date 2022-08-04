@@ -30,19 +30,27 @@ app_max_log_file_size = 100
 app_archived_files = 10
 
 # ------------------------------------------------------------------- #
-# UDP port to listen on for OVOC alarm forwarding and other messages. #
-# It is expected that OVOC will forward the selected alarms in SYSLOG #
-# format.                                                             #
+# Toggle whether or not to send the different traffic types after a   #
+# Connection Lost event is triggered for a device. (True or False)    #
 # ------------------------------------------------------------------- #
-listen_port = 20001
+send_icmp = True
+send_snmp = True
+send_tcp = True
 
 # ------------------------------------------------------------------- #
 # UDP port that the complementary traffic capture Python script on    #
 # the OVOC server is listening on. Commands are sent to the OVOC app  #
 # to start and stop traffic captures for the targeted CPE devices.    #
-# NOTE: This value can be set via interactive entry from this script. #
 # ------------------------------------------------------------------- #
 ovoc_listen_port = 20001
+
+# ------------------------------------------------------------------- #
+# UDP port to listen on for OVOC alarm forwarding and other messages. #
+# It is expected that OVOC will forward the selected alarms in SYSLOG #
+# format.                                                             #
+# NOTE: This value can be set via interactive entry from this script. #
+# ------------------------------------------------------------------- #
+listen_port = 20001
 
 # ------------------------------------------------------------------- #
 # Max registration attempts when a CPE setups up communications to an #

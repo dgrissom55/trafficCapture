@@ -29,6 +29,14 @@ app_log_file = 'ovoc_capture_app.log'
 app_max_log_file_size = 100
 app_archived_files = 10
 
+# ------------------------------------------------------------------- #
+# Toggle whether or not to send the different traffic types after a   #
+# Connection Lost event is triggered for a device. (True or False)    #
+# ------------------------------------------------------------------- #
+send_icmp = True
+send_snmp = True
+send_tcp = True
+
 # ---------------------------------------------------------------------- #
 # Flag to prevent the script from shutting down when there are no active #
 # captures to manage. Setting this to 'y' prevents this script from      #

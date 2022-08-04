@@ -161,7 +161,8 @@ The following is an example of what is tracked:
                   <NEXT TASK>
 
               ],
-              "cpeState": "REGISTERED|STARTED|ALARMED|VERIFIED|STOPPED|RETRIEVED",
+              "cpeCapture": "active|not active",
+              "cpeEvent": "active|not active",
               "events": <some value>,
               "ovocCapture": "active|not active",
               "registration": "active|not active|aborted",
@@ -798,6 +799,43 @@ def update_cpe_devices(logger, log_id, cpe_devices):
 def get_cpe_devices(logger, log_id):
     """Build list of CPE devices to target for network captures."""
     
+    # ------------------------------------------------------------------- #
+    # For each entered device, initialize information dictionary with the #
+    # following items:                                                    #
+    # {                                                                   #
+    #     "devices": [                                                    #
+    #         {                                                           #
+    #             "device": "<device address>",                           #
+    #             "type": "MSBR|GWSBC",                                   #
+    #             "interfaces": [                                         #
+    #                 "cellular-wan",                                     #
+    #                 "fiber-wan",                                        #
+    #                 "xdsl-wan",                                         #
+    #                 "shdsl-wan",                                        #
+    #                 "t1-e1-wan",                                        #
+    #                 "eth-wan",                                          #
+    #                 "eth-lan"                                           #
+    #              ],                                                     #
+    #             "username": "<device REST API username>",               #
+    #             "password": "<device REST API password>",               #
+    #             "completed": False,                                     #
+    #             "cpeCapture": "not active",                             #
+    #             "cpeEvent": "not active",                               #
+    #             "registration": "not active",                           #
+    #             "registerAttempts": 0,                                  #
+    #             "ovoc": "<ovoc address>",                               #
+    #             "ovocCapture": "not active",                            #
+    #             "events": 0,                                            #
+    #             "tasks": []                                             #
+    #         },                                                          #
+    #         ...                                                         #
+    #         <Next Device>                                               #
+    #     ]                                                               #
+    # }                                                                   #
+    #                                                                     #
+    # NOTE: Only one interface type ('eth-lan') is allowed on gateway and #
+    #       SBC devices. 
+    # ------------------------------------------------------------------- #
     devices_info = {}
     devices_info['devices'] = []
 
@@ -1151,9 +1189,21 @@ def get_cpe_devices(logger, log_id):
                 devices_info['devices'][device_index]['username'] = this_device_user
                 devices_info['devices'][device_index]['password'] = this_device_pass
                 devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
-                devices_info['devices'][device_index]['cpeState'] = ''
+                devices_info['devices'][device_index]['state'] = ''
                 devices_info['devices'][device_index]['completed'] = False
                 devices_info['devices'][device_index]['tasks'] = []
+
+                # ---------------------------------------------------- #
+                # Default 'cpeCapture' to 'not active' to indicate the #
+                # device isn't currently performing a network capture. #
+                # ---------------------------------------------------- #
+                devices_info['devices'][device_index]['cpeCapture'] = 'not active'
+
+                # -------------------------------------------------- #
+                # Default 'cpeEvent' to 'not active' to indicate the #
+                # device isn't currently in a triggered event state. #
+                # -------------------------------------------------- #
+                devices_info['devices'][device_index]['cpeEvent'] = 'not active'
 
                 # --------------------------------------------------------- #
                 # Default 'ovocCapture' to 'not active' to indicate the     #
@@ -1389,9 +1439,21 @@ def get_cpe_devices(logger, log_id):
             devices_info['devices'][device_index]['username'] = this_device_user
             devices_info['devices'][device_index]['password'] = this_device_pass
             devices_info['devices'][device_index]['ovoc'] = this_ovoc_address
-            devices_info['devices'][device_index]['cpeState'] = ''
+            devices_info['devices'][device_index]['state'] = ''
             devices_info['devices'][device_index]['completed'] = False
             devices_info['devices'][device_index]['tasks'] = []
+
+            # ---------------------------------------------------- #
+            # Default 'cpeCapture' to 'not active' to indicate the #
+            # device isn't currently performing a network capture. #
+            # ---------------------------------------------------- #
+            devices_info['devices'][device_index]['cpeCapture'] = 'not active'
+
+            # -------------------------------------------------- #
+            # Default 'cpeEvent' to 'not active' to indicate the #
+            # device isn't currently in a triggered event state. #
+            # -------------------------------------------------- #
+            devices_info['devices'][device_index]['cpeEvent'] = 'not active'
 
             # --------------------------------------------------------- #
             # Default 'ovocCapture' to 'not active' to indicate the     #
