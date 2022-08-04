@@ -76,6 +76,8 @@
 ### Added or Changed
 - Handle empty UDP messages from OVOC servers.
 - Check to rotate logs added to end of socket loops.
+- For devices that are truly down with no network connectivity, the CPE script now continually attempts to reach the device to stop its debug capture and retrieve its capture file. The script pauses for 30 seconds between attempts to communicate with the device that is in the `Connection Lost` state. Capture are not stopped until the CPE script retrieves the capture file from the device.
+- Control whether or not to generate ICMP, SNMPv3, or TCP traffic from the `config.py` file for both CPE and OVOC capture scripts.
 
 ## v1.0.5
 
@@ -239,12 +241,14 @@ The CPE capture script `cpe_capture_app.py` tracks capture states, all tasks, an
 
               ],
               "cpeCapture": "active|not active",
+              "cpeEvent": "active|not active",
               "ovocCapture": "active|not active",
               "registration": "active|not active|aborted",
               "registerAttempts": <some value>,
               "events": <some value>,
               "lastRequest": "REGISTER|CAPTURE|VERIFY|STOP",
               "lastResponse": "<some response>",
+              "awaitingResponse": "True|False",
               "lastCapture": "<stored CPE capture filename>
           },
 
